@@ -1,0 +1,21 @@
+# compilation Maven
+target/
+
+# genere par start.ps1 (dates de depart recalculees a chaque chargement)
+redis/01_seed.redis
+
+# fichiers produits par la compilation LaTeX
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+
+# IDE
+.idea/
+.vscode/
+.classpath
+.project
+.settings/

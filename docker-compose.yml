@@ -1,0 +1,8 @@
+# nom de projet fixe : meme conteneur quel que soit le dossier (depot NoSQL ou Services Web)
+name: blasa
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: blasa-redis
+    ports:
+      - "6379:6379"

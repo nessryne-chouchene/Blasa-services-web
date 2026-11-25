@@ -1,0 +1,687 @@
+% =====================================================================
+%  Rapport Services Web - Projet Blasa (covoiturage etudiant) - API REST
+%  A compiler avec pdfLaTeX (Overleaf : menu > Compiler = pdfLaTeX)
+%  Les captures d'ecran vont dans le dossier figures/ (voir \capture)
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[french]{babel}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\usepackage{fancyhdr}
+\usepackage{caption}
+\usepackage[colorlinks=true,linkcolor=teal!60!black,urlcolor=teal!60!black]{hyperref}
+
+% ------------------------- A COMPLETER -------------------------------
+\newcommand{\auteurA}{Nessryne Chouchene}          % <- 1er etudiant
+\newcommand{\auteurB}{Omayma Hamdy}          % <- 2e etudiant
+\newcommand{\niveau}{Data Engineering}
+\newcommand{\annee}{2026--2027}
+\newcommand{\encadrante}{Mme Fatma Krichen}
+% ---------------------------------------------------------------------
+
+\definecolor{brand}{HTML}{0F766E}
+\setlist{itemsep=2pt,topsep=4pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\renewcommand{\arraystretch}{1.25}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\captionsetup{font=small,labelfont=bf}
+
+% texte litteral (URI, cles...) : pas d'espace parasite apres ':' avec babel-french
+\newcommand{\cle}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\amp}{\texttt{\&}}
+
+% capture d'ecran : affiche l'image si elle existe, sinon un cadre a remplacer
+\newcommand{\capture}[3][0.9]{%
+  \begin{figure}[htbp]\centering
+  \IfFileExists{figures/#2.png}{\includegraphics[width=#1\textwidth]{figures/#2.png}}{%
+    \fbox{\parbox{0.8\textwidth}{\centering\vspace{1.6cm}\textit{Capture \`a ins\'erer : figures/#2.png}\vspace{1.6cm}}}}
+  \caption{#3}\end{figure}}
+
+\lstdefinestyle{code}{basicstyle=\ttfamily\footnotesize,backgroundcolor=\color{black!4},
+  frame=single,rulecolor=\color{black!20},breaklines=true,columns=fullflexible,keepspaces=true,
+  showstringspaces=false,xleftmargin=0.4em,xrightmargin=0.4em,aboveskip=0.8em,belowskip=0.8em,
+  keywordstyle=\color{blue!60!black}\bfseries,commentstyle=\color{green!40!black}\itshape,
+  stringstyle=\color{red!50!black}}
+\lstset{style=code}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Blasa --- Rapport Services Web}
+\fancyhead[R]{\small \nouppercase{\leftmark}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+\begin{document}
+
+% =============================== PAGE DE GARDE ========================
+\begin{titlepage}
+\centering
+{\large Universit\'e de Sfax\\[2pt] Facult\'e des Sciences de Sfax (FSS)\par}
+\vspace{0.6cm}
+{\normalsize \niveau\ --- Ann\'ee universitaire \annee\par}
+\vspace{2.2cm}
+{\large\scshape Rapport de projet\par}
+{\large Module : Services Web\par}
+\vspace{1cm}
+\rule{\textwidth}{1.2pt}\\[0.5cm]
+{\Huge\bfseries\color{brand} Blasa\par}
+\vspace{0.3cm}
+{\Large Une API REST pour le covoiturage \'etudiant\\ en Tunisie\par}
+\rule{\textwidth}{1.2pt}
+\vspace{2.2cm}
+
+\begin{tabular}{rl}
+\textbf{R\'ealis\'e par :} & \auteurA \\ & \auteurB \\[6pt]
+\textbf{Encadrante :} & \encadrante
+\end{tabular}
+
+\vfill
+{\small Ce rapport pr\'esente la partie \emph{API REST} du projet. La base de donn\'ees Redis fait l'objet d'un rapport s\'epar\'e pour le module NoSQL.}
+\end{titlepage}
+
+% =============================== RESUME ===============================
+\begin{abstract}
+\noindent Blasa est une application de covoiturage pour les \'etudiants tunisiens. Ce rapport pr\'esente le \textbf{service web REST} qui en constitue le c\oe ur : une API en Java (Jersey, JAX-RS) qui expose des \textbf{ressources} (utilisateurs, trajets, r\'eservations, notes, statistiques) au travers des m\'ethodes HTTP \texttt{GET}, \texttt{POST}, \texttt{PUT}, \texttt{PATCH} et \texttt{DELETE}, avec des codes de r\'eponse pr\'ecis (200, 201, 204, 400, 404, 409) et des \'echanges au format JSON. Nous d\'ecrivons la conception de l'API, son impl\'ementation, l'interface web qui la consomme et la d\'emarche de test (Postman).
+
+\medskip
+\noindent\textbf{Mots-cl\'es :} services web, REST, HTTP, JSON, JAX-RS, Jersey, Postman, API.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% =============================== 1. INTRODUCTION ======================
+\section{Introduction}
+
+\subsection{Contexte et probl\'ematique}
+Une application moderne s\'epare l'\emph{interface} que voit l'utilisateur et les \emph{services} qui portent les donn\'ees et les r\`egles m\'etier. Dans Blasa, un conducteur propose des places, un passager cherche, r\'eserve puis note. Toutes ces actions passent par un service web.
+
+La question de ce rapport est la suivante :
+\begin{quote}
+\emph{Comment exposer les fonctionnalit\'es de Blasa sous la forme d'une API REST claire, qui utilise correctement les m\'ethodes et les codes HTTP et qui soit facile \`a tester ?}
+\end{quote}
+
+\subsection{Objectifs}
+\begin{itemize}
+  \item concevoir des ressources et des URI coh\'erentes ;
+  \item utiliser \texttt{GET}, \texttt{POST}, \texttt{PUT}, \texttt{PATCH} et \texttt{DELETE} \`a bon escient ;
+  \item renvoyer des codes de r\'eponse significatifs et des erreurs lisibles ;
+  \item impl\'ementer le service avec Jersey (JAX-RS), comme dans le cours ;
+  \item fournir une interface web et une collection Postman pour tester l'API.
+\end{itemize}
+
+\subsection{Flux de donn\'ees}
+Toute action suit le m\^eme chemin, de l'utilisateur jusqu'\`a la base et retour :
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[box/.style={draw,rounded corners,minimum width=2.9cm,minimum height=1.2cm,align=center,fill=#1},>=Stealth,font=\small]
+\node[box=teal!15] (c) {Client\\(page web)};
+\node[box=orange!20,right=2.6cm of c] (a) {\textbf{API REST}\\Jersey / Java};
+\node[box=red!15,right=2.6cm of a] (r) {Base de donn\'ees\\Redis};
+\draw[->] ([yshift=3mm]c.east) -- node[above]{requ\^ete HTTP} ([yshift=3mm]a.west);
+\draw[<-] ([yshift=-3mm]c.east) -- node[below]{r\'eponse JSON} ([yshift=-3mm]a.west);
+\draw[->] ([yshift=3mm]a.east) -- node[above]{commandes} ([yshift=3mm]r.west);
+\draw[<-] ([yshift=-3mm]a.east) -- node[below]{donn\'ees} ([yshift=-3mm]r.west);
+\end{tikzpicture}
+\caption{Chemin d'une requ\^ete : client $\rightarrow$ API $\rightarrow$ base de donn\'ees $\rightarrow$ r\'eponse.}
+\end{figure}
+
+% =============================== 2. RAPPELS ===========================
+\section{Rappels : services web et REST}
+
+\subsection{Architecture orient\'ee services}
+Dans une architecture orient\'ee services (SOA), un \textbf{fournisseur} publie un service, un \textbf{consommateur} l'utilise, et un annuaire permet de le d\'ecouvrir. Dans Blasa, l'API est le fournisseur et la page web est le consommateur. Comme l'API ne d\'epend pas de l'interface, n'importe quel autre client (application mobile, Postman) peut l'utiliser.
+
+\subsection{SOAP et REST}
+\begin{table}[htbp]\centering
+\begin{tabularx}{\textwidth}{@{}L{3cm}XX@{}}
+\toprule
+ & \textbf{SOAP} & \textbf{REST}\\
+\midrule
+Nature & Protocole normalis\'e & Style d'architecture\\
+Description du service & Contrat WSDL, annuaire UDDI & URI et m\'ethodes HTTP\\
+Format des \'echanges & XML (enveloppe SOAP) & JSON ou XML, souvent JSON\\
+Poids & Plut\^ot lourd & L\'eger\\
+Usage typique & Syst\`emes d'entreprise formels & Applications web et mobiles\\
+\bottomrule
+\end{tabularx}
+\caption{Comparaison de SOAP et REST.}
+\end{table}
+
+Nous avons choisi REST : l'API est simple, lisible dans un navigateur ou dans Postman, et s'appuie directement sur HTTP.
+
+\subsection{Les m\'ethodes HTTP}
+Une ressource est identifi\'ee par une \textbf{URI} (par exemple \cle{/api/rides/1}). La m\'ethode HTTP exprime l'action demand\'ee. Deux propri\'et\'es sont importantes : une m\'ethode est \textbf{s\^ure} si elle ne modifie pas l'\'etat du serveur, et \textbf{idempotente} si la r\'ep\'eter plusieurs fois donne le m\^eme \'etat final qu'une seule fois.
+
+\begin{table}[htbp]\centering
+\begin{tabularx}{\textwidth}{@{}L{2.2cm}L{3.6cm}L{1.8cm}L{2.5cm}X@{}}
+\toprule
+\textbf{M\'ethode} & \textbf{R\^ole} & \textbf{S\^ure} & \textbf{Idempotente} & \textbf{Exemple dans Blasa}\\
+\midrule
+\texttt{GET} & Lire & oui & oui & lire un trajet\\
+\texttt{POST} & Cr\'eer, d\'eclencher une action & non & non & publier un trajet, r\'eserver\\
+\texttt{PUT} & Remplacer enti\`erement & non & oui & remplacer un profil\\
+\texttt{PATCH} & Modifier partiellement & non & pas garantie & changer la ville d'un profil\\
+\texttt{DELETE} & Supprimer & non & oui & annuler un trajet\\
+\bottomrule
+\end{tabularx}
+\caption{M\'ethodes HTTP utilis\'ees par l'API.}
+\end{table}
+
+\subsection{Codes de r\'eponse utilis\'es}
+\begin{table}[htbp]\centering
+\begin{tabularx}{\textwidth}{@{}L{1.4cm}L{3.4cm}X@{}}
+\toprule
+\textbf{Code} & \textbf{Nom} & \textbf{Quand l'utilisons-nous ?}\\
+\midrule
+200 & OK & Lecture ou modification r\'eussie, avec un corps JSON\\
+201 & Created & Cr\'eation r\'eussie ; l'en-t\^ete \texttt{Location} donne l'URI de la nouvelle ressource\\
+204 & No Content & Suppression r\'eussie : il n'y a plus rien \`a renvoyer\\
+400 & Bad Request & Donn\'ees manquantes ou invalides (champ vide, note 9, date pass\'ee)\\
+404 & Not Found & La ressource demand\'ee n'existe pas\\
+409 & Conflict & Les donn\'ees sont valides mais l'\'etat actuel refuse l'action (trajet complet, d\'ej\`a r\'eserv\'e)\\
+\bottomrule
+\end{tabularx}
+\caption{Codes HTTP renvoy\'es par l'API.}
+\end{table}
+
+% =============================== 3. CHOIX TECHNIQUES ==================
+\section{Choix techniques}
+
+\begin{table}[htbp]\centering
+\begin{tabularx}{\textwidth}{@{}L{3.6cm}L{3.2cm}X@{}}
+\toprule
+\textbf{Technologie} & \textbf{Version} & \textbf{R\^ole}\\
+\midrule
+Java & 21 & Langage de l'API\\
+Maven & 3.9 & Gestion des d\'ependances et lancement\\
+Jersey (JAX-RS) & 2.41 & Impl\'ementation des services REST (\texttt{javax.ws.rs})\\
+Jackson & via Jersey & Conversion objets Java $\leftrightarrow$ JSON\\
+Jersey SSE & 2.41 & Flux en direct vers le navigateur (\texttt{javax.ws.rs.sse})\\
+Leaflet + OpenStreetMap & 1.9 & Carte interactive de l'interface\\
+Grizzly & via Jersey & Serveur HTTP int\'egr\'e\\
+Jedis & 5.1 & Client Java pour Redis\\
+Redis & 7 (Docker) & Base de donn\'ees (voir le rapport NoSQL)\\
+Postman & --- & Tests de l'API\\
+\bottomrule
+\end{tabularx}
+\caption{Technologies utilis\'ees.}
+\end{table}
+
+\paragraph{Pourquoi Jersey ?}
+C'est l'impl\'ementation de JAX-RS vue en cours. Les services s'\'ecrivent avec des annotations (\texttt{@Path}, \texttt{@GET}, \texttt{@POST}\ldots) sur de simples classes Java.
+
+\paragraph{Pourquoi un serveur int\'egr\'e ?}
+Plut\^ot que d'installer et de configurer un serveur d'applications, nous d\'emarrons Grizzly depuis la m\'ethode \texttt{main}. Le projet se lance avec une seule commande. Le code des ressources est du JAX-RS standard : il pourrait aussi \^etre d\'eploy\'e sur Tomcat avec un descripteur adapt\'e.
+
+% =============================== 4. ARCHITECTURE ======================
+\section{Architecture de l'application}
+
+\subsection{Trois couches}
+Le code est organis\'e en couches, chacune avec une responsabilit\'e unique :
+
+\begin{table}[htbp]\centering
+\begin{tabularx}{\textwidth}{@{}L{3.0cm}L{4.8cm}X@{}}
+\toprule
+\textbf{Couche} & \textbf{Paquet Java} & \textbf{R\^ole}\\
+\midrule
+Ressources REST & \cle{soa.blasa.resource} & Re\c coivent les requ\^etes HTTP, v\'erifient les donn\'ees, choisissent le code de r\'eponse\\
+D\'ep\^ots (\emph{repository}) & \cle{soa.blasa.repository} & Parlent \`a Redis : lire, \'ecrire, supprimer\\
+Mod\`ele & \cle{soa.blasa.model} & Objets \texttt{User} et \texttt{Ride}, convertis en JSON\\
+\bottomrule
+\end{tabularx}
+\caption{Couches du projet.}
+\end{table}
+
+Cette s\'eparation \'evite de m\'elanger le protocole HTTP et l'acc\`es aux donn\'ees : une ressource ne contient aucune commande Redis.
+
+\subsection{Structure du projet}
+\begin{lstlisting}
+blasa/
+  pom.xml                      dependances Maven
+  docker-compose.yml           lance Redis
+  start.ps1                    lance tout (Redis, donnees, API)
+  postman/                     collection de tests
+  src/main/java/soa/blasa/
+    Main.java                  demarre le serveur
+    model/       User, Ride
+    repository/  RedisConfig, UserRepository, RideRepository,
+                 StatsRepository, Cities, Conflict
+    resource/    UserResource, RideResource, BookingResource,
+                 RatingResource, StatsResource, DebugResource, PATCH
+  src/main/resources/web/      interface web (index.html)
+\end{lstlisting}
+
+\subsection{D\'emarrage du serveur}
+La classe \texttt{Main} cr\'ee la configuration Jersey, qui scanne le paquet des ressources, active la conversion JSON, puis d\'emarre Grizzly. Le m\^eme serveur sert l'API sous \cle{/api} et l'interface web \`a la racine.
+\begin{lstlisting}[language=Java]
+ResourceConfig config = new ResourceConfig()
+        .packages("soa.blasa.resource")      // trouve les classes @Path
+        .register(JacksonFeature.class);     // active le JSON
+URI base = URI.create("http://0.0.0.0:8080/api/");
+HttpServer server = GrizzlyHttpServerFactory.createHttpServer(base, config, false);
+server.getServerConfiguration().addHttpHandler(
+        new CLStaticHttpHandler(Main.class.getClassLoader(), "web/"), "/");
+server.start();
+\end{lstlisting}
+
+% =============================== 5. CONCEPTION API ====================
+\section{Conception de l'API}
+
+\subsection{Principes}
+\begin{itemize}
+  \item \textbf{Des noms, pas des verbes} dans les URI : \cle{/rides}, pas \cle{/createRide}. C'est la m\'ethode HTTP qui exprime l'action.
+  \item \textbf{Des noms au pluriel} pour les collections : \cle{/users}, \cle{/rides}.
+  \item \textbf{Des sous-ressources} pour les objets qui d\'ependent d'un autre : \cle{/rides/{id}/bookings} (les r\'eservations d'un trajet), \cle{/users/{id}/ratings} (les notes d'un utilisateur).
+  \item \textbf{Des param\`etres de requ\^ete} pour filtrer : \cle{/rides?from=sfax}\amp\cle{to=tunis}.
+  \item \textbf{JSON} pour les corps de requ\^ete et de r\'eponse, y compris pour les erreurs : \cle{{"error": "..."}}.
+\end{itemize}
+
+\subsection{Tableau des endpoints}
+Toutes les URI sont pr\'ec\'ed\'ees de \cle{/api}.
+
+\begin{table}[htbp]\centering\small
+\begin{tabularx}{\textwidth}{@{}L{1.6cm}L{5.4cm}XL{1.2cm}L{1.8cm}@{}}
+\toprule
+\textbf{M\'ethode} & \textbf{URI} & \textbf{R\^ole} & \textbf{Succ\`es} & \textbf{Erreurs}\\
+\midrule
+POST & \cle{/users} & Cr\'eer un compte & 201 & 400\\
+GET & \cle{/users} & Lister les utilisateurs & 200 & ---\\
+GET & \cle{/users/{id}} & Lire un profil & 200 & 404\\
+PUT & \cle{/users/{id}} & Remplacer un profil & 200 & 400, 404\\
+PATCH & \cle{/users/{id}} & Modifier des champs & 200 & 400, 404\\
+DELETE & \cle{/users/{id}} & Supprimer le compte & 204 & 404\\
+\midrule
+POST & \cle{/rides} & Proposer un trajet & 201 & 400, 404\\
+GET & \cle{/rides} & Chercher des trajets & 200 & 400\\
+GET & \cle{/rides/{id}} & D\'etail d'un trajet & 200 & 404\\
+PUT & \cle{/rides/{id}} & Remplacer prix, places, date & 200 & 400, 404, 409\\
+PATCH & \cle{/rides/{id}} & Modifier prix, places, date, statut & 200 & 400, 404, 409\\
+DELETE & \cle{/rides/{id}} & Annuler le trajet & 204 & 404\\
+\midrule
+POST & \cle{/rides/{id}/bookings} & R\'eserver une place & 201 & 400, 404, 409\\
+DELETE & \cle{/rides/{id}/bookings/{userId}} & Annuler une r\'eservation & 204 & 404\\
+\midrule
+POST & \cle{/users/{id}/ratings} & Noter un conducteur (1 \`a 5) & 201 & 400, 404\\
+GET & \cle{/stats/top-drivers} & Meilleurs conducteurs & 200 & 400\\
+GET & \cle{/stats/summary} & Compteurs globaux & 200 & ---\\
+\midrule
+GET & \cle{/events} & Flux en direct (SSE) & 200 (flux continu) & ---\\
+\bottomrule
+\end{tabularx}
+\caption{Endpoints de l'API Blasa (18 op\'erations m\'etier). Un endpoint suppl\'ementaire, \cle{GET /debug/redis}, sert uniquement \`a la d\'emonstration.}
+\end{table}
+
+\paragraph{Recherche de trajets.}
+\cle{GET /rides} accepte trois modes : sans param\`etre (tous les trajets), avec \texttt{from} et/ou \texttt{to} (filtre par villes), ou avec \texttt{lat}, \texttt{lon} et \texttt{radius} (trajets autour d'un point, tri\'es par distance, avec \texttt{distanceKm} dans la r\'eponse). Si \texttt{lat} est donn\'e sans \texttt{lon}, l'API r\'epond 400.
+
+\subsection{PUT ou PATCH ?}
+Les deux modifient une ressource existante, mais pas de la m\^eme fa\c con :
+\begin{itemize}
+  \item \textbf{PUT} \emph{remplace} la ressource : le client envoie tous les champs. Si l'un manque (par exemple l'email d'un profil), l'API r\'epond 400.
+  \item \textbf{PATCH} modifie \emph{seulement les champs envoy\'es} : \cle{{"city": "Sousse"}} change la ville et laisse le reste intact.
+\end{itemize}
+JAX-RS fournit \texttt{@GET}, \texttt{@POST}, \texttt{@PUT} et \texttt{@DELETE}, mais \textbf{pas} \texttt{@PATCH}. Nous avons donc cr\'e\'e notre propre annotation, que Jersey reconna\^it gr\^ace \`a \texttt{@HttpMethod} :
+\begin{lstlisting}[language=Java]
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+@HttpMethod("PATCH")
+public @interface PATCH {
+}
+\end{lstlisting}
+
+\subsection{Idempotence dans Blasa}
+\begin{table}[htbp]\centering
+\begin{tabularx}{\textwidth}{@{}L{2.2cm}X@{}}
+\toprule
+\textbf{M\'ethode} & \textbf{Comportement observ\'e dans l'API}\\
+\midrule
+GET & Lire dix fois le trajet 1 ne change rien.\\
+POST & Non idempotent : deux \cle{POST /users} identiques cr\'eent deux utilisateurs. Pour les r\'eservations, un doublon est refus\'e (409) : l'API se prot\`ege.\\
+PUT & Envoyer deux fois le m\^eme profil donne le m\^eme \'etat final.\\
+PATCH & Chaque champ re\c coit une valeur fixe : en pratique, r\'ep\'eter l'appel ne change plus rien.\\
+DELETE & Le premier appel renvoie 204, le second 404 ; mais l'\'etat du serveur est identique apr\`es l'un comme apr\`es l'autre.\\
+\bottomrule
+\end{tabularx}
+\caption{Propri\'et\'es des m\'ethodes dans notre impl\'ementation.}
+\end{table}
+
+\subsection{Pourquoi 409 pour une r\'eservation refus\'ee ?}
+Un trajet complet ou d\'ej\`a r\'eserv\'e n'est pas une erreur de syntaxe (400) ni une ressource absente (404) : la requ\^ete est correcte, mais elle entre en \textbf{conflit avec l'\'etat actuel}. Le code 409 exprime exactement cela.
+
+% =============================== 6. IMPLEMENTATION ====================
+\section{Impl\'ementation avec Jersey}
+
+\subsection{Annotations JAX-RS utilis\'ees}
+\begin{table}[htbp]\centering
+\begin{tabularx}{\textwidth}{@{}L{3.6cm}X@{}}
+\toprule
+\textbf{Annotation} & \textbf{R\^ole}\\
+\midrule
+\texttt{@Path("/users")} & URI de la classe, ou d'une m\'ethode (\texttt{@Path("/\{id\}")})\\
+\texttt{@GET}, \texttt{@POST}, \texttt{@PUT}, \texttt{@DELETE}, \texttt{@PATCH} & M\'ethode HTTP g\'er\'ee par la m\'ethode Java\\
+\texttt{@PathParam("id")} & Valeur extraite de l'URI\\
+\texttt{@QueryParam("from")} & Param\`etre apr\`es le \texttt{?}\\
+\texttt{@DefaultValue("50")} & Valeur par d\'efaut d'un param\`etre\\
+\texttt{@Produces}, \texttt{@Consumes} & Format de sortie et d'entr\'ee (JSON)\\
+\bottomrule
+\end{tabularx}
+\caption{Annotations JAX-RS rencontr\'ees dans le code.}
+\end{table}
+
+\subsection{Exemple : la ressource des utilisateurs}
+Voici le d\'ebut de la classe, avec la cr\'eation (\texttt{POST}) et la lecture (\texttt{GET}). Les m\'ethodes renvoient un objet \texttt{Response} : cela permet de choisir librement le code HTTP.
+\begin{lstlisting}[language=Java]
+@Path("/users")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+public class UserResource {
+
+    private final UserRepository repo = new UserRepository();
+
+    @POST
+    public Response create(User body) {
+        if (body == null || blank(body.getName())
+                || blank(body.getEmail()) || blank(body.getCity())) {
+            return error(Response.Status.BAD_REQUEST,
+                         "name, email et city sont obligatoires");
+        }
+        User created = repo.create(body);
+        return Response.created(URI.create("/api/users/" + created.getId()))
+                       .entity(created).build();          // 201 + Location
+    }
+
+    @GET
+    @Path("/{id}")
+    public Response get(@PathParam("id") long id) {
+        User u = repo.find(id);
+        if (u == null) {
+            return error(Response.Status.NOT_FOUND,
+                         "utilisateur " + id + " introuvable");
+        }
+        return Response.ok(u).build();                    // 200
+    }
+    ...
+}
+\end{lstlisting}
+Jackson convertit automatiquement le corps JSON re\c cu en objet \texttt{User}, et l'objet renvoy\'e en JSON.
+
+\subsection{Exemple : r\'eserver une place}
+La ressource des r\'eservations encha\^ine les v\'erifications et traduit chaque cas en un code HTTP pr\'ecis :
+\begin{lstlisting}[language=Java]
+@POST
+public Response book(@PathParam("rideId") long rideId, Map<String, Object> body) {
+    // 400 : userId absent ou pas un nombre
+    Ride ride = rides.find(rideId);
+    if (ride == null)             -> 404  trajet introuvable
+    if (users.find(userId) == null) -> 404  utilisateur introuvable
+    if (ride.getDriverId() == userId) -> 400  conducteur = passager
+    try {
+        long left = rides.book(rideId, userId);
+        return Response.created(...).entity(...).build();   // 201
+    } catch (Conflict c) {
+        return error(CONFLICT, c.getMessage());              // 409
+    }
+}
+\end{lstlisting}
+(Les lignes avec \texttt{->} r\'esument le test et le code renvoy\'e ; le code complet est dans le projet.) La classe \texttt{Conflict} est lev\'ee par la couche d'acc\`es aux donn\'ees quand le trajet est ferm\'e, d\'ej\`a r\'eserv\'e par ce passager, ou complet.
+
+\subsection{\'Echanges HTTP r\'eels}
+Voici trois \'echanges relev\'es pendant les tests.
+
+\paragraph{Cr\'eation d'un trajet (201).}
+\begin{lstlisting}
+POST /api/rides HTTP/1.1
+Content-Type: application/json
+
+{"driverId":1,"origin":"Gabes","destination":"Sfax",
+ "departureAt":1795463310,"seats":3,"price":9}
+
+HTTP/1.1 201 Created
+Location: http://localhost:8080/api/rides/6
+
+{"id":6,"driverId":1,"origin":"gabes","destination":"sfax",
+ "departureAt":1795463310,"seats":3,"seatsLeft":3,"price":9,
+ "status":"OPEN","passengers":[]}
+\end{lstlisting}
+
+\paragraph{R\'eservation en double (409).}
+\begin{lstlisting}
+POST /api/rides/1/bookings HTTP/1.1
+Content-Type: application/json
+
+{"userId":3}
+
+HTTP/1.1 409 Conflict
+
+{"error":"tu as deja reserve ce trajet"}
+\end{lstlisting}
+
+\paragraph{Suppression (204), puis nouvelle tentative (404).}
+\begin{lstlisting}
+DELETE /api/users/5            ->  HTTP/1.1 204 No Content
+DELETE /api/users/5            ->  HTTP/1.1 404 Not Found
+                                   {"error":"utilisateur 5 introuvable"}
+\end{lstlisting}
+
+\subsection{Validation des donn\'ees}
+Chaque ressource v\'erifie les donn\'ees avant d'appeler la base, et r\'epond 400 avec un message clair : champs obligatoires, villes diff\'erentes, nombre de places entre 1 et 8, prix positif, date de d\'epart dans le futur, note entre 1 et 5, statut \texttt{OPEN} ou \texttt{CLOSED}.
+
+% =============================== 7. SSE ===============================
+\section{Mise \`a jour en direct : Server-Sent Events}
+
+\subsection{Le besoin}
+Avec les m\'ethodes classiques, le client pose une question et le serveur r\'epond : le serveur ne peut pas parler le premier. Or, quand un passager r\'eserve, les autres \'ecrans doivent se mettre \`a jour tout de suite. Trois solutions existent :
+
+\begin{table}[htbp]\centering
+\begin{tabularx}{\textwidth}{@{}L{3.3cm}XX@{}}
+\toprule
+\textbf{Technique} & \textbf{Principe} & \textbf{Inconv\'enient}\\
+\midrule
+Interrogation r\'ep\'et\'ee (\emph{polling}) & Le client redemande l'\'etat toutes les secondes & Beaucoup de requ\^etes inutiles\\
+WebSocket & Canal bidirectionnel permanent & Protocole \`a part, plus complexe\\
+\textbf{Server-Sent Events (SSE)} & Une requ\^ete HTTP \texttt{GET} reste ouverte ; le serveur y \'ecrit des messages quand il le souhaite & Un seul sens (serveur $\rightarrow$ client), suffisant ici\\
+\bottomrule
+\end{tabularx}
+\caption{Trois fa\c cons de mettre \`a jour une page en direct.}
+\end{table}
+
+Nous avons choisi SSE : c'est du HTTP ordinaire (un \texttt{GET} avec le type \texttt{text/event-stream}), donc dans la continuit\'e du cours, et le navigateur le g\`ere nativement avec \texttt{EventSource}, y compris la reconnexion automatique.
+
+\subsection{Impl\'ementation avec JAX-RS}
+JAX-RS 2.1 fournit l'API \texttt{javax.ws.rs.sse} : \texttt{SseEventSink} (la connexion d'un client), \texttt{Sse} (fabrique de messages) et \texttt{SseBroadcaster} (envoie un message \`a tous les clients connect\'es).
+\begin{lstlisting}[language=Java]
+@Singleton
+@Path("/events")
+public class EventResource {
+
+    @GET
+    @Produces(MediaType.SERVER_SENT_EVENTS)      // text/event-stream
+    public void subscribe(@Context SseEventSink sink) {
+        broadcaster.register(sink);              // ce client recevra tous les messages
+        sink.send(sse.newEventBuilder().name("hello").data("connecte").build());
+    }
+    ...
+}
+\end{lstlisting}
+Les messages \`a diffuser viennent du Pub/Sub de Redis (voir le rapport NoSQL) : l'API publie un \'ev\'enement sur le canal \cle{blasa:events} \`a chaque r\'eservation, cr\'eation ou annulation ; un fil d'ex\'ecution abonn\'e au canal les re\c coit et appelle \texttt{broadcaster.broadcast(...)}.
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[box/.style={draw,rounded corners,minimum width=2.5cm,minimum height=1.1cm,align=center,fill=#1},>=Stealth,font=\small]
+\node[box=teal!15] (b) {Navigateur A\\\texttt{POST} r\'eservation};
+\node[box=orange!20,right=1.8cm of b] (a) {API\\Jersey};
+\node[box=red!15,right=1.8cm of a] (r) {Redis\\Pub/Sub};
+\node[box=teal!15,below=1.3cm of r] (c) {Navigateur B\\\texttt{GET /events}};
+\draw[->] (b) -- node[above]{1} (a);
+\draw[->] (a) -- node[above]{2 publie} (r);
+\draw[->] (r) -- node[right]{3 diffuse} (c);
+\draw[->,dashed] (a.south) -- node[below left]{ouvert en permanence} (c.west);
+\end{tikzpicture}
+\caption{Une r\'eservation faite dans le navigateur A met \`a jour le navigateur B.}
+\end{figure}
+
+\subsection{C\^ot\'e client}
+\begin{lstlisting}
+const es = new EventSource("/api/events");
+es.addEventListener("blasa", (e) => {
+  const ev = JSON.parse(e.data);   // ex. {"type":"booked","rideId":2,...}
+  // notification + rechargement de la vue courante
+});
+\end{lstlisting}
+Un voyant \og En direct \fg{} dans l'en-t\^ete indique que la connexion est ouverte. Un message \texttt{ping} est envoy\'e toutes les 20 secondes pour garder la connexion active.
+
+\subsection{Message re\c cu}
+Test r\'ealis\'e avec \texttt{curl -N} pendant qu'une r\'eservation, une annulation et deux modifications sont envoy\'ees depuis un autre terminal :
+\begin{lstlisting}
+event: hello
+data: connecte
+
+event: blasa
+data: {"type":"booked","rideId":2,"userId":3,"seatsLeft":3}
+
+event: blasa
+data: {"type":"booking_cancelled","rideId":2,"userId":3,"seatsLeft":4}
+
+event: blasa
+data: {"type":"ride_updated","rideId":2}
+\end{lstlisting}
+
+% =============================== 8. INTERFACE =========================
+\section{Interface web}
+
+\subsection{R\^ole}
+Pour que l'API soit utilisable sans outil technique, nous avons r\'ealis\'e une application web d'une seule page (HTML, CSS et JavaScript), servie par le m\^eme serveur. Elle ne parle jamais directement \`a la base : \textbf{toutes ses actions passent par des appels \texttt{fetch} vers l'API}. Elle illustre donc le flux client $\rightarrow$ API $\rightarrow$ base de donn\'ees $\rightarrow$ r\'eponse.
+
+\subsection{\'Ecrans}
+\begin{itemize}
+  \item \textbf{Bienvenue} : choix d'un profil ou cr\'eation de compte (\texttt{GET}, \texttt{POST /users}).
+  \item \textbf{Trouver un trajet} : recherche par villes ou autour de soi, cartes de trajets, r\'eservation (\texttt{GET /rides}, \texttt{POST .../bookings}).
+  \item \textbf{Carte} : carte interactive de la Tunisie (Leaflet et OpenStreetMap). Un clic sur la carte et un rayon lancent \texttt{GET /rides?lat=\ldots\&lon=\ldots\&radius=\ldots}, et les trajets trouv\'es s'affichent sur la carte et dans une liste.
+  \item \textbf{Proposer} : formulaire de publication (\texttt{POST /rides}), avec un bouton de d\'emonstration qui cr\'ee un trajet partant dans 60 secondes.
+  \item \textbf{Mes trajets} : r\'eservations avec notation du conducteur, trajets propos\'es avec changement de prix, fermeture et annulation (\texttt{PATCH}, \texttt{DELETE}, \texttt{POST .../ratings}).
+  \item \textbf{Classement} : compteurs et meilleurs conducteurs (\texttt{GET /stats/...}).
+  \item \textbf{Profil} : modification (\texttt{PUT /users/\{id\}}) et suppression de compte (\texttt{DELETE}).
+\end{itemize}
+
+\textbf{Compte \`a rebours.} Chaque trajet affiche en direct le temps avant son d\'epart. \`A z\'ero, le trajet dispara\^it de l'\'ecran, car le serveur Redis l'a supprim\'e lui-m\^eme (voir le rapport NoSQL).
+
+\textbf{Mises \`a jour en direct.} Quand quelqu'un d'autre r\'eserve, une notification appara\^it et le nombre de places se met \`a jour sans recharger la page (section pr\'ec\'edente).
+
+\capture{ui-recherche}{\'Ecran \og Trouver un trajet \fg : recherche et r\'eservation.}
+\capture{ui-carte}{\'Ecran \og Carte \fg : trajets autour d'un point, dans un rayon r\'eglable.}
+\capture{ui-mes-trajets}{\'Ecran \og Mes trajets \fg : r\'eservations et notation du conducteur.}
+
+\subsection{Mode technique}
+Un bouton \og Mode technique \fg{} ouvre un panneau qui montre, pour chaque action de l'application, la \textbf{requ\^ete} (m\'ethode, URL, corps), le \textbf{code de r\'eponse} et le \textbf{JSON re\c cu}. Il contient aussi un \textbf{sc\'enario de d\'emonstration} qui encha\^ine les cinq m\'ethodes et les principaux codes (voir l'annexe~\ref{app:scenario}).
+
+\capture{ui-mode-technique}{Mode technique : requ\^etes, codes HTTP et r\'eponses JSON de chaque action.}
+
+% =============================== 8. TESTS =============================
+\section{Tests et validation}
+
+\subsection{Collection Postman}
+Nous avons \'ecrit une collection Postman de \textbf{24 requ\^etes}, ordonn\'ees pour s'encha\^iner. Chaque requ\^ete contient un test qui v\'erifie le code de r\'eponse attendu, et sauvegarde les identifiants cr\'e\'es (variables \texttt{userId} et \texttt{rideId}) pour la suite. Le \emph{Collection Runner} ex\'ecute le tout d'un clic.
+
+\begin{table}[htbp]\centering
+\begin{tabularx}{\textwidth}{@{}L{4.3cm}L{1.5cm}X@{}}
+\toprule
+\textbf{Dossier} & \textbf{Requ\^etes} & \textbf{Codes v\'erifi\'es}\\
+\midrule
+1. Utilisateurs & 6 & 201, 200, 200, 200, 400, 404\\
+2. Trajets & 7 & 201, 200, 200, 200, 200, 200, 400\\
+3. R\'eservations & 4 & 201, 409, 204, 404\\
+4. Notes et statistiques & 4 & 201, 400, 200, 200\\
+5. Nettoyage & 3 & 204, 204, 404\\
+\midrule
+\textbf{Total} & \textbf{24} & \\
+\bottomrule
+\end{tabularx}
+\caption{Contenu de la collection Postman.}
+\end{table}
+
+\textbf{R\'esultat :} les 24 requ\^etes renvoient le code attendu.
+
+\capture{postman-runner}{R\'esultat du Collection Runner de Postman : 24 tests r\'eussis.}
+
+\subsection{Cas limites test\'es}
+Au-del\`a du cas nominal, nous avons v\'erifi\'e les cas d'erreur de chaque verbe :
+\begin{itemize}
+  \item \texttt{POST} sans email $\rightarrow$ 400 ; \texttt{GET} d'un identifiant inexistant $\rightarrow$ 404 ;
+  \item \texttt{PUT} incomplet $\rightarrow$ 400 ; \texttt{PATCH} avec un champ inconnu $\rightarrow$ 400 ;
+  \item \texttt{DELETE} deux fois de suite $\rightarrow$ 204 puis 404 ;
+  \item r\'eservation en double, par le conducteur lui-m\^eme, sur un trajet inexistant ou ferm\'e $\rightarrow$ 409, 400, 404, 409 ;
+  \item r\'eduction du nombre de places en dessous du nombre de r\'eservations $\rightarrow$ 409 ;
+  \item note de 9 $\rightarrow$ 400 ; \texttt{lat} sans \texttt{lon} $\rightarrow$ 400.
+\end{itemize}
+
+% =============================== 9. LIMITES ===========================
+\section{Limites et perspectives}
+\begin{itemize}
+  \item \textbf{Pas d'authentification.} L'utilisateur est choisi dans l'interface : n'importe qui peut agir au nom d'un autre. Une version r\'eelle utiliserait un jeton (JWT) et HTTPS.
+  \item \textbf{Erreurs de JSON mal form\'e.} Une syntaxe JSON invalide re\c coit bien un 400, mais en texte brut et non au format \cle{{"error": ...}} ; un \emph{ExceptionMapper} corrigerait cela.
+  \item \textbf{Pas de pagination.} \cle{GET /rides} renvoie tous les r\'esultats ; il faudrait des param\`etres \texttt{page} et \texttt{size}.
+  \item \textbf{Une seule version.} Un pr\'efixe \cle{/api/v1} faciliterait les \'evolutions.
+  \item \textbf{Documentation.} Une description OpenAPI (Swagger) g\'en\'ererait automatiquement la documentation et un client de test.
+  \item \textbf{Tests automatis\'es.} Les tests actuels passent par Postman ; des tests JUnit compl\'eteraient la d\'emarche.
+  \item \textbf{Notes illimit\'ees.} Rien n'emp\^eche de noter plusieurs fois le m\^eme conducteur.
+\end{itemize}
+
+% =============================== 10. CONCLUSION =======================
+\section{Conclusion}
+Nous avons con\c cu et r\'ealis\'e une API REST compl\`ete pour Blasa, avec Jersey. Elle expose 18 op\'erations organis\'ees en ressources, utilise les cinq m\'ethodes HTTP et renvoie des codes de r\'eponse pr\'ecis, dont le 409 pour les conflits d'\'etat. Une annotation \texttt{@PATCH} personnalis\'ee comble un manque de JAX-RS. Le tout est d\'emontrable de deux fa\c cons compl\'ementaires : une interface web grand public, et une collection Postman de 24 tests.
+
+Ce projet nous a appris \`a penser une API \`a partir de ses ressources, \`a distinguer clairement \texttt{PUT} et \texttt{PATCH}, et \`a choisir le code de r\'eponse qui dit la v\'erit\'e sur ce qui s'est pass\'e. Associ\'e \`a la base Redis d\'ecrite dans le rapport NoSQL, il forme une application compl\`ete.
+
+% =============================== ANNEXES ==============================
+\appendix
+\section{Sc\'enario de d\'emonstration}\label{app:scenario}
+Le bouton de d\'emonstration du mode technique ex\'ecute ces 16 appels, dans l'ordre :
+
+\begin{table}[htbp]\centering\small
+\begin{tabularx}{\textwidth}{@{}rL{1.8cm}L{5.8cm}L{1.2cm}X@{}}
+\toprule
+\textbf{N\textdegree} & \textbf{M\'ethode} & \textbf{URI} & \textbf{Code} & \textbf{But}\\
+\midrule
+1 & POST & \cle{/users} & 201 & cr\'eer un compte\\
+2 & GET & \cle{/users/{id}} & 200 & lire le profil\\
+3 & PATCH & \cle{/users/{id}} & 200 & changer la ville\\
+4 & PUT & \cle{/users/{id}} & 200 & remplacer le profil\\
+5 & POST & \cle{/rides} & 201 & proposer un trajet\\
+6 & GET & \cle{/rides?from=sfax}\amp\cle{to=tunis} & 200 & recherche par villes\\
+7 & GET & \cle{/rides?lat=34.74}\amp\cle{lon=10.76}\amp\cle{radius=50} & 200 & recherche autour de Sfax\\
+8 & POST & \cle{/rides/{id}/bookings} & 201 & r\'eserver\\
+9 & POST & \cle{/rides/{id}/bookings} & 409 & r\'eserver \`a nouveau (conflit)\\
+10 & PATCH & \cle{/rides/{id}} & 200 & changer le prix\\
+11 & POST & \cle{/users/2/ratings} & 201 & noter un conducteur\\
+12 & GET & \cle{/stats/top-drivers} & 200 & classement\\
+13 & DELETE & \cle{/rides/{id}/bookings/{userId}} & 204 & annuler la r\'eservation\\
+14 & DELETE & \cle{/rides/{id}} & 204 & annuler le trajet\\
+15 & DELETE & \cle{/users/{id}} & 204 & supprimer le compte\\
+16 & GET & \cle{/users/{id}} & 404 & v\'erifier la suppression\\
+\bottomrule
+\end{tabularx}
+\caption{Sc\'enario de d\'emonstration en 16 appels.}
+\end{table}
+
+\section{Lancer le projet}
+Pr\'erequis : Docker Desktop, JDK 21 et Maven. Depuis le dossier du projet :
+\begin{lstlisting}
+.\start.ps1            # demarre Redis, charge les donnees, lance l'API
+.\start.ps1 -Reset     # repart de donnees de demonstration neuves
+\end{lstlisting}
+L'application est ensuite disponible sur \url{http://localhost:8080/} et l'API sur \url{http://localhost:8080/api}. Pour Postman, importer le fichier \texttt{postman/blasa.postman\_collection.json}.
+
+\end{document}

@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blasa - covoiturage étudiant</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --brand: #0f766e; --brand-dark: #0b5a54; --brand-soft: #d9f2ee; --sun: #f59e0b;
+    --bg: #f4f6f4; --card: #ffffff; --text: #1b2a2a; --muted: #5f6f6f; --line: #e0e7e5;
+    --ok: #15803d; --warn: #b45309; --err: #b91c1c; --shadow: 0 6px 20px rgba(15, 60, 55, .08);
+    --code-bg: #0f172a; --code-text: #e2e8f0; --flash: #fef3c7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --brand: #2dd4bf; --brand-dark: #14b8a6; --brand-soft: #123a37; --sun: #fbbf24;
+      --bg: #0e1514; --card: #16201f; --text: #e8f0ef; --muted: #9db0ae; --line: #26332f;
+      --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --shadow: 0 6px 20px rgba(0, 0, 0, .35);
+      --code-bg: #0a0f14; --flash: #3a3216;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 3px solid var(--sun); outline-offset: 2px; }
+
+  /* ---------- barre du haut ---------- */
+  .top { position: sticky; top: 0; z-index: 20; background: var(--card); border-bottom: 1px solid var(--line); }
+  .top-in { max-width: 1040px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .logo { font-weight: 800; font-size: 22px; color: var(--brand); letter-spacing: -.02em; display: flex; align-items: center; gap: 6px; }
+  .logo b { color: var(--sun); }
+  nav { display: flex; gap: 4px; flex: 1; overflow-x: auto; }
+  nav button { border: 0; background: transparent; padding: 8px 14px; border-radius: 999px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+  nav button:hover { background: var(--brand-soft); }
+  nav button.on { background: var(--brand-soft); color: var(--brand); }
+  @media (max-width: 720px) { nav { order: 5; flex-basis: 100%; } .top-in { gap: 8px 10px; } .me-chip { margin-left: auto; } }
+  .me-chip { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--card);
+             padding: 4px 12px 4px 4px; border-radius: 999px; font-weight: 600; }
+  .tech-btn { border: 1px dashed var(--line); background: transparent; border-radius: 999px; padding: 6px 12px; color: var(--muted); font-size: 14px; }
+  .tech-btn:hover { border-color: var(--brand); color: var(--brand); }
+
+  /* ---------- zone principale ---------- */
+  main { max-width: 1040px; margin: 0 auto; padding: 0 16px 80px; }
+  .hero { margin: 16px 0 0; border-radius: 20px; padding: 28px 22px 70px; color: #fff;
+          background: linear-gradient(135deg, #0f766e 0%, #115e59 55%, #134e4a 100%); }
+  .hero h1 { margin: 0 0 6px; font-size: clamp(24px, 4.5vw, 36px); letter-spacing: -.02em; }
+  .hero p { margin: 0; opacity: .9; max-width: 560px; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); }
+  .search { margin: -46px 14px 0; position: relative; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; }
+  label.f { display: block; font-size: 13px; font-weight: 600; color: var(--muted); }
+  label.f input, label.f select { width: 100%; margin-top: 4px; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line);
+                                  background: var(--bg); font-size: 16px; }
+  .btn { border: 0; border-radius: 10px; padding: 11px 18px; font-weight: 700; background: var(--brand); color: #fff; }
+  .btn:hover { background: var(--brand-dark); }
+  .btn.ghost { background: transparent; color: var(--brand); border: 1px solid var(--line); }
+  .btn.ghost:hover { border-color: var(--brand); background: var(--brand-soft); }
+  .btn.danger { background: transparent; color: var(--err); border: 1px solid var(--line); }
+  .btn.danger:hover { border-color: var(--err); }
+  .btn.small { padding: 7px 12px; font-size: 14px; }
+  .btn[disabled] { opacity: .55; cursor: default; }
+  h2.title { margin: 26px 0 12px; font-size: 20px; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: 14px; margin: -6px 0 12px; }
+
+  /* ---------- cartes de trajets ---------- */
+  .list { display: grid; gap: 12px; }
+  .ride { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: var(--shadow);
+          display: grid; gap: 10px; }
+  .ride-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .route { font-size: 20px; font-weight: 800; letter-spacing: -.01em; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .route i { font-style: normal; color: var(--sun); }
+  .price { font-size: 26px; font-weight: 800; color: var(--brand); white-space: nowrap; }
+  .price small { font-size: 14px; font-weight: 600; color: var(--muted); }
+  .when { color: var(--muted); text-transform: capitalize; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+  .driver { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .stars { color: var(--sun); letter-spacing: 1px; white-space: nowrap; }
+  .stars em { color: var(--muted); font-style: normal; font-size: 13px; letter-spacing: 0; margin-left: 4px; }
+  .badge { font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); }
+  .badge.low { background: #fde8c8; color: #8a4b00; } .badge.full { background: #fadada; color: #8f1d1d; }
+  @media (prefers-color-scheme: dark) { .badge.low { background: #46330d; color: #fbbf24; } .badge.full { background: #4a1f1f; color: #f87171; } }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; display: inline-grid; place-items: center; color: #fff; font-weight: 700; font-size: 14px; flex: none; }
+  .avatar.big { width: 64px; height: 64px; font-size: 26px; }
+  .empty { text-align: center; padding: 36px 16px; color: var(--muted); background: var(--card); border: 1px dashed var(--line); border-radius: 16px; }
+  .empty b { display: block; font-size: 18px; color: var(--text); margin-bottom: 4px; }
+  .tabs { display: flex; gap: 6px; margin: 22px 0 4px; }
+  .tabs button { border: 1px solid var(--line); background: var(--card); padding: 8px 16px; border-radius: 999px; font-weight: 600; color: var(--muted); }
+  .tabs button.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .rate { display: inline-flex; gap: 2px; align-items: center; }
+  .rate button { border: 0; background: transparent; font-size: 26px; line-height: 1; color: var(--sun); opacity: .45; padding: 2px; }
+  .rate button:hover { opacity: 1; transform: scale(1.15); }
+
+  /* ---------- classement et stats ---------- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; text-align: center; box-shadow: var(--shadow); }
+  .tile b { display: block; font-size: 32px; color: var(--brand); letter-spacing: -.02em; }
+  .tile span { color: var(--muted); font-size: 14px; }
+  .rank { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+  .rank .n { font-size: 22px; font-weight: 800; width: 28px; text-align: center; color: var(--sun); }
+  .rank .who { flex: 1; font-weight: 700; }
+  .form { max-width: 560px; display: grid; gap: 14px; }
+  .profile-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+  .profile-head h2 { margin: 0; }
+
+  /* ---------- fenetre de bienvenue ---------- */
+  .overlay { position: fixed; inset: 0; z-index: 50; background: rgba(8, 20, 18, .65); display: grid; place-items: center; padding: 16px; overflow: auto; }
+  .modal { background: var(--card); border-radius: 20px; max-width: 560px; width: 100%; padding: 24px; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+  .modal h2 { margin: 0 0 4px; font-size: 24px; }
+  .who-list { display: grid; gap: 8px; margin: 14px 0; }
+  .who-btn { display: flex; align-items: center; gap: 12px; text-align: left; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+  .who-btn:hover { border-color: var(--brand); background: var(--brand-soft); }
+  .who-btn small { display: block; color: var(--muted); }
+
+  /* ---------- messages ---------- */
+  #toasts { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 90; display: grid; gap: 8px; width: min(92vw, 440px); }
+  .toast { background: #14302d; color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: var(--shadow); font-weight: 600; border-left: 6px solid var(--ok); }
+  .toast.err { border-left-color: var(--err); }
+
+  /* ---------- mode technique (tiroir) ---------- */
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(100vw, 520px); z-index: 40; background: var(--bg); border-left: 1px solid var(--line);
+            box-shadow: -10px 0 30px rgba(0,0,0,.25); transform: translateX(105%); transition: transform .25s; overflow: auto; padding: 16px; }
+  #drawer.open { transform: none; }
+  .d-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .d-head h2 { margin: 0; font-size: 18px; }
+  .d-sec { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-top: 12px; }
+  .d-sec h3 { margin: 0 0 8px; font-size: 14px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 0; }
+  pre { margin: 0; background: var(--code-bg); color: var(--code-text); padding: 10px; border-radius: 8px; overflow: auto;
+        font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+  .log { max-height: 46vh; overflow: auto; }
+  .call { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 10px; }
+  .call .line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font: 13px ui-monospace, Consolas, monospace; margin-bottom: 6px; }
+  .m-GET { color: var(--ok); } .m-POST { color: var(--warn); } .m-PUT { color: #2563eb; } .m-PATCH { color: #7c3aed; } .m-DELETE { color: var(--err); }
+  .code { padding: 1px 8px; border-radius: 999px; font-weight: 700; font-size: 12px; color: #fff; }
+  .s2 { background: #15803d; } .s4 { background: #b45309; } .s5 { background: #b91c1c; }
+  .redis { color: var(--muted); font-size: 12px; margin: 4px 0 6px; } .redis code { color: var(--brand); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); } td.val { font: 11px ui-monospace, Consolas, monospace; word-break: break-word; }
+  tr.flash { background: var(--flash); }
+  .type { font-size: 10px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+  .keys { max-height: 40vh; overflow: auto; }
+
+  /* ---------- en direct, compte a rebours, carte ---------- */
+  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .live i { width: 9px; height: 9px; border-radius: 50%; background: #9aa5a3; display: inline-block; }
+  .live.on i { background: #22c55e; animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.55); } 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+  .cd { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--brand); }
+  .cd.soon { color: var(--warn); } .cd.urgent { color: var(--err); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .45; } }
+  .ride.gone, .mini.gone { opacity: .3; transform: scale(.97); transition: all .9s; }
+  .ride.flash, .mini.flash { animation: flashcard 1.8s; }
+  @keyframes flashcard { 0% { box-shadow: 0 0 0 5px var(--sun); } 100% { box-shadow: var(--shadow); } }
+  .mapwrap { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 860px) { .mapwrap { grid-template-columns: minmax(0, 1fr); } }
+  #map { height: 580px; border-radius: 16px; border: 1px solid var(--line); box-shadow: var(--shadow); z-index: 1; }
+  @media (max-width: 860px) { #map { height: 380px; } }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .chip { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 4px 12px; font-size: 14px; }
+  .chip:hover { border-color: var(--brand); background: var(--brand-soft); }
+  .mini { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-top: 8px; background: var(--card); }
+  .mini .t { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
+  .mini .s { color: var(--muted); font-size: 13px; margin: 2px 0 6px; }
+  .cmd { font: 12px ui-monospace, Consolas, monospace; background: var(--code-bg); color: var(--code-text); padding: 8px 10px; border-radius: 8px; word-break: break-word; margin: 8px 0; }
+  input[type=range] { width: 100%; padding: 0; margin: 6px 0; accent-color: var(--brand); }
+  .evlog .ev { font: 12px ui-monospace, Consolas, monospace; border-bottom: 1px solid var(--line); padding: 4px 0; word-break: break-word; }
+  .leaflet-popup-content { font: 14px/1.4 system-ui, sans-serif; margin: 10px 12px; }
+  .leaflet-popup-content .btn { margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <div class="logo"><span>🚗</span><span>Blas<b>a</b></span></div>
+    <nav id="nav">
+      <button data-v="search" class="on">Trouver un trajet</button>
+      <button data-v="map">Carte</button>
+      <button data-v="offer">Proposer</button>
+      <button data-v="mine">Mes trajets</button>
+      <button data-v="top">Classement</button>
+    </nav>
+    <span class="live" id="live" title="Connexion en direct (Redis Pub/Sub puis SSE)"><i></i><span>Hors ligne</span></span>
+    <button class="me-chip" id="me-chip" hidden></button>
+    <button class="tech-btn" id="tech-btn" title="Voir les requêtes HTTP et Redis">&lt;/&gt; Mode technique</button>
+  </div>
+</header>
+
+<main id="view"></main>
+
+<!-- ======== Mode technique : ce que voient les professeures ======== -->
+<aside id="drawer" aria-label="Mode technique">
+  <div class="d-head"><h2>Mode technique</h2><button class="btn ghost small" id="d-close">Fermer ✕</button></div>
+  <p class="hint">Client (cette page) → API REST (Jersey) → Redis → réponse JSON. Chaque action de l'application apparaît ici.</p>
+  <div class="d-sec">
+    <button class="btn" id="demo">▶ Scénario de démo (tous les verbes HTTP)</button>
+    <p class="hint" style="margin-top:8px">Enchaîne POST, GET, PUT, PATCH, DELETE et les codes 201, 200, 204, 404, 409.</p>
+  </div>
+  <div class="d-sec"><h3>Requête / Réponse</h3>
+    <div class="log" id="log"><p class="hint">Fais une action dans l'application : la requête, le code HTTP et la réponse JSON s'affichent ici.</p></div>
+  </div>
+  <div class="d-sec"><h3>Événements en direct <span class="hint">(Redis Pub/Sub → SSE)</span></h3>
+    <div class="evlog log" id="evlog" style="max-height:22vh"><p class="hint">En attente d'événements… Ouvre l'application dans deux fenêtres et réserve une place dans l'une.</p></div>
+  </div>
+  <div class="d-sec"><h3>Contenu de Redis <button class="btn ghost small" id="refresh" style="margin-left:6px">↻</button></h3>
+    <p class="hint" style="margin-bottom:6px">Les lignes modifiées sont surlignées.</p>
+    <div class="keys"><table id="keys"><thead><tr><th>clé</th><th>type</th><th>TTL</th><th>contenu</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</aside>
+
+<div class="overlay" id="welcome" hidden></div>
+<div id="toasts" aria-live="polite"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+const API = "/api";
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// [libelle affiche, valeur envoyee a l'API]
+const CITIES = [["Tunis","Tunis"],["Ariana","Ariana"],["Bizerte","Bizerte"],["Nabeul","Nabeul"],["Hammamet","Hammamet"],["Zaghouan","Zaghouan"],
+  ["Béja","Beja"],["Jendouba","Jendouba"],["Le Kef","Kef"],["Sousse","Sousse"],["Monastir","Monastir"],["Mahdia","Mahdia"],["Kairouan","Kairouan"],
+  ["Kasserine","Kasserine"],["Sidi Bouzid","Sidi Bouzid"],["Sfax","Sfax"],["Gafsa","Gafsa"],["Gabès","Gabes"],["Médenine","Medenine"],
+  ["Djerba","Djerba"],["Tozeur","Tozeur"],["Tataouine","Tataouine"]];
+const slug = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z]/g, "");
+const cityLabel = (s) => { const c = CITIES.find((x) => slug(x[1]) === slug(s)); return c ? c[0] : (s ? s[0].toUpperCase() + s.slice(1) : ""); };
+const cityOptions = (selected, withAll) =>
+  (withAll ? '<option value="">Toutes les villes</option>' : "") +
+  CITIES.map((c) => '<option value="' + c[1] + '"' + (slug(c[1]) === slug(selected) ? " selected" : "") + ">" + c[0] + "</option>").join("");
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } },
+  del(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
+};
+
+let me = null, users = [], currentView = "search", mineTab = "booked", drawerOpen = false;
+const rated = new Set();
+let lastOwn = 0, lastSearch = null;
+
+const userById = (id) => users.find((u) => u.id === id);
+const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+const avatar = (u, big) => '<span class="avatar' + (big ? " big" : "") + '" style="background:hsl(' + hue(u ? u.name : "?") + ',55%,42%)">' + esc(u ? u.name[0].toUpperCase() : "?") + "</span>";
+function stars(avg, count) {
+  if (!count) return '<span class="stars"><em>Nouveau</em></span>';
+  const full = Math.round(avg);
+  return '<span class="stars">' + "★".repeat(full) + "☆".repeat(5 - full) + "<em>" + avg.toFixed(1) + " (" + count + ")</em></span>";
+}
+const fmtDate = (ts) => new Date(ts * 1000).toLocaleString("fr-FR", { weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+function toast(msg, isErr) {
+  const t = document.createElement("div"); t.className = "toast" + (isErr ? " err" : ""); t.textContent = msg;
+  $("toasts").appendChild(t); setTimeout(() => t.remove(), 3800);
+}
+
+/* ================= appels a l'API (journalises dans le mode technique) ================= */
+async function api(method, path, body, opt) {
+  opt = opt || {};
+  const o = { method, headers: {} };
+  if (body !== undefined) { o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(body); }
+  const t0 = performance.now(); let status = 0, text = "";
+  try { const r = await fetch(API + path, o); status = r.status; text = await r.text(); } catch (e) { text = "Erreur réseau : " + e.message; }
+  let data = null; try { data = text ? JSON.parse(text) : null; } catch (e) { /* texte brut */ }
+  if (!opt.quiet) logCall(method, API + path, body, status, Math.round(performance.now() - t0), data, text, opt.note);
+  if (method !== "GET" && !opt.quiet) lastOwn = Date.now();   // pour ne pas afficher une notification de sa propre action
+  if (method !== "GET" && drawerOpen) refreshRedis();
+  return { status, ok: status >= 200 && status < 300, data };
+}
+
+function logCall(method, url, body, status, ms, data, text, note) {
+  const log = $("log"); if (log.querySelector(".hint")) log.innerHTML = "";
+  const el = document.createElement("div"); el.className = "call";
+  const cls = status >= 500 || status === 0 ? "s5" : status >= 400 ? "s4" : "s2";
+  el.innerHTML = '<div class="line"><b class="m-' + method + '">' + method + "</b><span>" + esc(url) + '</span><span class="code ' + cls + '">' + status + "</span><span>" + ms + " ms</span></div>";
+  if (note) el.insertAdjacentHTML("beforeend", '<div class="redis">Redis : ' + note + "</div>");
+  if (body !== undefined) { const b = document.createElement("pre"); b.style.marginBottom = "6px"; b.textContent = "→ corps envoyé\n" + JSON.stringify(body, null, 2); el.appendChild(b); }
+  const r = document.createElement("pre"); r.textContent = "← réponse\n" + (data !== null ? JSON.stringify(data, null, 2) : (text || "(aucun corps)")); el.appendChild(r);
+  log.insertBefore(el, log.firstChild);
+}
+
+let previous = {};
+async function refreshRedis() {
+  let rows = []; try { rows = await (await fetch(API + "/debug/redis")).json(); } catch (e) { return; }
+  const tb = $("keys").querySelector("tbody"); tb.innerHTML = ""; const now = {};
+  rows.forEach((r) => {
+    const v = JSON.stringify(r.value); now[r.key] = v;
+    const tr = document.createElement("tr");
+    if (previous[r.key] !== v && Object.keys(previous).length) tr.className = "flash";
+    const ttl = r.ttl === -1 ? "∞" : r.ttl === -2 ? "-" : (r.ttl >= 3600 ? Math.floor(r.ttl / 3600) + " h " + Math.floor((r.ttl % 3600) / 60) + " min" : r.ttl + " s");
+    tr.innerHTML = "<td></td><td><span class='type'></span></td><td></td><td class='val'></td>";
+    tr.children[0].textContent = r.key; tr.querySelector(".type").textContent = r.type; tr.children[2].textContent = ttl; tr.children[3].textContent = v;
+    tb.appendChild(tr);
+  });
+  previous = now;
+}
+$("refresh").onclick = refreshRedis;
+setInterval(() => { if (drawerOpen) refreshRedis(); }, 2000);   // le TTL se voit descendre en direct
+$("tech-btn").onclick = () => { drawerOpen = !drawerOpen; $("drawer").classList.toggle("open", drawerOpen); if (drawerOpen) refreshRedis(); };
+$("d-close").onclick = () => { drawerOpen = false; $("drawer").classList.remove("open"); };
+
+/* ================= utilisateur courant ================= */
+async function loadUsers() { const r = await api("GET", "/users", undefined, { quiet: true }); users = r.ok ? r.data : []; return users; }
+
+function setMe(u) {
+  me = u; store.set("blasa.me", String(u.id));
+  $("me-chip").hidden = false;
+  $("me-chip").innerHTML = avatar(u) + "<span>" + esc(u.name) + "</span>";
+  $("welcome").hidden = true;
+  go("search");
+}
+
+function showWelcome() {
+  const w = $("welcome"); w.hidden = false;
+  w.innerHTML = '<div class="modal"><h2>Bienvenue sur Blasa 👋</h2>' +
+    '<p class="sub">Le covoiturage entre étudiants, partout en Tunisie. Choisis ton profil pour essayer l\'application.</p>' +
+    '<div class="who-list">' + users.map((u) => '<button class="who-btn" data-act="pick" data-id="' + u.id + '">' + avatar(u) +
+      "<span><b>" + esc(u.name) + "</b><small>" + esc(cityLabel(u.city)) + " · " + (u.ratingCount ? u.averageRating.toFixed(1) + " ★" : "nouveau") + "</small></span></button>").join("") + "</div>" +
+    '<h3 style="margin:18px 0 8px">Ou crée ton compte</h3>' +
+    '<form id="signup" class="form" style="max-width:none">' +
+    '<label class="f">Prénom<input id="su-name" required maxlength="40"></label>' +
+    '<label class="f">Email<input id="su-email" type="email" required></label>' +
+    '<label class="f">Ta ville<select id="su-city">' + cityOptions("Sfax") + "</select></label>" +
+    '<button class="btn">Créer mon compte</button></form></div>';
+  $("signup").onsubmit = async (e) => {
+    e.preventDefault();
+    const r = await api("POST", "/users", { name: $("su-name").value.trim(), email: $("su-email").value.trim(), city: $("su-city").value },
+      { note: "<code>INCR seq:user</code>, <code>HSET user:{id}</code>" });
+    if (!r.ok) return toast((r.data && r.data.error) || "Création impossible", true);
+    await loadUsers(); setMe(r.data); toast("Compte créé. Bienvenue " + r.data.name + " !");
+  };
+}
+
+/* ================= navigation ================= */
+function go(v) {
+  if (map) { map.remove(); map = null; mapCircle = null; }   // on quitte la carte : on la detruit proprement
+  currentView = v;
+  document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("on", b.dataset.v === v));
+  window.scrollTo(0, 0);
+  ({ search: viewSearch, map: viewMap, offer: viewOffer, mine: viewMine, top: viewTop, profile: viewProfile })[v]();
+}
+$("nav").onclick = (e) => { const b = e.target.closest("button"); if (b && me) go(b.dataset.v); };
+$("me-chip").onclick = () => me && go("profile");
+
+/* ================= enrichir les trajets avec les passagers ================= */
+async function enrich(list) {
+  const all = await Promise.all(list.map(async (r) => {
+    const d = await api("GET", "/rides/" + r.id, undefined, { quiet: true });
+    return d.ok ? Object.assign({}, r, d.data, { distanceKm: r.distanceKm }) : r;
+  }));
+  // un trajet dont l'heure de depart est passee n'est plus propose (Redis le supprime lui-meme via EXPIREAT)
+  return all.filter((r) => r.departureAt * 1000 > Date.now());
+}
+
+/* ================= vue : trouver un trajet ================= */
+function rideCard(r) {
+  const drv = userById(r.driverId);
+  const mine = me && r.driverId === me.id, booked = me && (r.passengers || []).includes(me.id);
+  const full = r.seatsLeft <= 0, closed = r.status !== "OPEN";
+  let action;
+  if (mine) action = '<button class="btn" disabled>Ton trajet</button>';
+  else if (booked) action = '<button class="btn" disabled>Réservé ✓</button><button class="btn ghost" data-act="unbook" data-ride="' + r.id + '">Annuler</button>';
+  else if (closed) action = '<button class="btn" disabled>Fermé</button>';
+  else if (full) action = '<button class="btn" disabled>Complet</button>';
+  else action = '<button class="btn" data-act="book" data-ride="' + r.id + '">Réserver ma place</button>';
+  const seats = full ? '<span class="badge full">Complet</span>'
+    : '<span class="badge ' + (r.seatsLeft === 1 ? "low" : "") + '">' + r.seatsLeft + (r.seatsLeft > 1 ? " places restantes" : " place restante") + "</span>";
+  return '<article class="ride" data-rid="' + r.id + '"><div class="ride-top"><div class="route"><span>' + esc(cityLabel(r.origin)) + "</span><i>→</i><span>" + esc(cityLabel(r.destination)) +
+    '</span></div><div class="price">' + r.price + " <small>DT</small></div></div>" +
+    '<div class="when">' + fmtDate(r.departureAt) + ' · ⏳ <span class="cd" data-dep="' + r.departureAt + '"></span></div>' +
+    '<div class="meta"><span class="driver">' + avatar(drv) + esc(drv ? drv.name : "Conducteur") + "</span>" +
+    (drv ? stars(drv.averageRating, drv.ratingCount) : "") + seats +
+    (r.distanceKm !== undefined ? '<span class="hint">à ' + r.distanceKm + " km de toi</span>" : "") + "</div>" +
+    '<div class="actions">' + action + "</div></article>";
+}
+
+function viewSearch() {
+  $("view").innerHTML =
+    '<section class="hero"><h1>Où vas-tu aujourd\'hui ?</h1><p>Trouve une place avec d\'autres étudiants et partage les frais du trajet.</p></section>' +
+    '<form class="panel search" id="sform"><div class="fields">' +
+    '<label class="f">Départ<select id="s-from">' + cityOptions("", true) + "</select></label>" +
+    '<label class="f">Arrivée<select id="s-to">' + cityOptions("", true) + "</select></label>" +
+    '<button class="btn" type="submit">Chercher</button>' +
+    '<button class="btn ghost" type="button" id="s-near">📍 Près de moi</button></div></form>' +
+    '<h2 class="title" id="s-title">Prochains trajets</h2><div class="list" id="results"></div>';
+  $("sform").onsubmit = (e) => { e.preventDefault(); doSearch(false); };
+  $("s-near").onclick = () => doSearch(true);
+  doSearch(false);
+}
+
+async function doSearch(near) {
+  const from = $("s-from").value, to = $("s-to").value; let path, note, title;
+  const q = new URLSearchParams();
+  if (near) {
+    let lat = 34.74, lon = 10.76;   // Sfax par defaut si la position n'est pas disponible
+    try {
+      const p = await new Promise((ok, ko) => navigator.geolocation ? navigator.geolocation.getCurrentPosition(ok, ko, { timeout: 4000 }) : ko());
+      lat = p.coords.latitude; lon = p.coords.longitude;
+    } catch (e) { toast("Position indisponible : recherche autour de Sfax."); }
+    q.set("lat", lat.toFixed(4)); q.set("lon", lon.toFixed(4)); q.set("radius", "50");
+    if (from) q.set("from", from); if (to) q.set("to", to);
+    note = "<code>GEOSEARCH rides:geo FROMLONLAT … BYRADIUS 50 KM ASC WITHDIST</code>"; title = "Trajets à moins de 50 km";
+  } else {
+    if (from) q.set("from", from); if (to) q.set("to", to);
+    note = from && to ? "<code>SINTER rides:from:… rides:to:…</code>" : from || to ? "<code>SMEMBERS rides:from|to:…</code>" : "<code>ZRANGE rides:geo 0 -1</code>";
+    title = from || to ? "Résultats" : "Prochains trajets";
+  }
+  lastSearch = { url: "/rides" + (q.toString() ? "?" + q : ""), note, title };
+  return runSearch(lastSearch);
+}
+
+async function runSearch(s) {
+  const r = await api("GET", s.url, undefined, { note: s.note });
+  if (!r.ok) return toast("Recherche impossible", true);
+  const rides = await enrich(r.data);
+  if (!$("s-title")) return;                       // on a change de page pendant le chargement
+  $("s-title").textContent = s.title + " (" + rides.length + ")";
+  $("results").innerHTML = rides.length ? rides.map(rideCard).join("")
+    : '<div class="empty"><b>Aucun trajet trouvé</b>Essaie d\'autres villes, ou propose toi-même ce trajet !</div>';
+  setTimeout(tick, 0);
+}
+
+/* ================= vue : proposer un trajet ================= */
+function viewOffer() {
+  const d = new Date(Date.now() + 86400000); d.setHours(8, 0, 0, 0);
+  const p = (n) => String(n).padStart(2, "0");
+  const when = d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T08:00";
+  $("view").innerHTML = '<h2 class="title">Proposer un trajet</h2><p class="sub">Tu pars quelque part ? Partage tes places libres.</p>' +
+    '<form class="panel form" id="oform">' +
+    '<label class="f">Départ<select id="o-from">' + cityOptions(me.city) + "</select></label>" +
+    '<label class="f">Arrivée<select id="o-to">' + cityOptions("Tunis") + "</select></label>" +
+    '<label class="f">Date et heure de départ<input id="o-when" type="datetime-local" value="' + when + '" required></label>' +
+    '<div class="fields"><label class="f">Places libres<select id="o-seats">' + [1,2,3,4,5,6,7,8].map((n) => '<option value="' + n + '"' + (n === 3 ? " selected" : "") + ">" + n + "</option>").join("") + "</select></label>" +
+    '<label class="f">Prix par place (DT)<input id="o-price" type="number" min="0" value="10" required></label></div>' +
+    '<div class="actions"><button class="btn">Publier mon trajet</button>' +
+    '<button type="button" class="btn ghost" id="o-demo" title="Crée un trajet qui part dans 60 secondes : Redis le supprimera tout seul">⏱ Démo TTL : partir dans 60 s</button></div></form>';
+  const publish = async (departureAt) => {
+    const r = await api("POST", "/rides", { driverId: me.id, origin: $("o-from").value, destination: $("o-to").value,
+      departureAt, seats: Number($("o-seats").value), price: Number($("o-price").value) },
+      { note: "<code>INCR seq:ride</code>, <code>HSET</code>, <code>EXPIREAT</code>, <code>GEOADD rides:geo</code>, <code>SADD rides:from|to:…</code>" });
+    if (!r.ok) return toast((r.data && r.data.error) || "Publication impossible", true);
+    toast("Trajet publié ! Il disparaîtra tout seul après le départ."); mineTab = "offered"; go("mine");
+  };
+  $("oform").onsubmit = (e) => { e.preventDefault(); publish(Math.floor(new Date($("o-when").value).getTime() / 1000)); };
+  $("o-demo").onclick = () => publish(Math.floor(Date.now() / 1000) + 60);
+}
+
+/* ================= vue : mes trajets ================= */
+async function viewMine() {
+  $("view").innerHTML = '<h2 class="title">Mes trajets</h2><div class="tabs" id="mtabs">' +
+    '<button data-t="booked" class="' + (mineTab === "booked" ? "on" : "") + '">Mes réservations</button>' +
+    '<button data-t="offered" class="' + (mineTab === "offered" ? "on" : "") + '">Mes trajets proposés</button></div><div class="list" id="mlist" style="margin-top:12px"><p class="hint">Chargement…</p></div>';
+  $("mtabs").onclick = (e) => { const b = e.target.closest("button"); if (b) { mineTab = b.dataset.t; viewMine(); } };
+  const r = await api("GET", "/rides", undefined, { note: "<code>ZRANGE rides:geo 0 -1</code>, <code>HGETALL ride:…</code>" });
+  const all = await enrich(r.ok ? r.data : []);
+  const html = [];
+  if (mineTab === "booked") {
+    all.filter((x) => (x.passengers || []).includes(me.id)).forEach((x) => {
+      const drv = userById(x.driverId), done = rated.has(x.id);
+      html.push(rideCard(x).replace('<div class="actions">', '<div class="actions">' +
+        (done ? '<span class="badge">Merci pour ta note ✓</span>' :
+          '<span class="hint">Noter ' + esc(drv ? drv.name : "le conducteur") + " :</span><span class=\"rate\">" +
+          [1, 2, 3, 4, 5].map((n) => '<button title="' + n + ' sur 5" data-act="rate" data-ride="' + x.id + '" data-user="' + x.driverId + '" data-score="' + n + '">★</button>').join("") + "</span>")));
+    });
+    $("mlist").innerHTML = html.length ? html.join("") : '<div class="empty"><b>Aucune réservation</b>Cherche un trajet et réserve ta place.</div>';
+  } else {
+    all.filter((x) => x.driverId === me.id).forEach((x) => {
+      const names = (x.passengers || []).map((id) => { const u = userById(id); return u ? u.name : "#" + id; });
+      html.push('<article class="ride" data-rid="' + x.id + '"><div class="ride-top"><div class="route"><span>' + esc(cityLabel(x.origin)) + "</span><i>→</i><span>" + esc(cityLabel(x.destination)) +
+        '</span></div><div class="price">' + x.price + " <small>DT</small></div></div><div class=\"when\">" + fmtDate(x.departureAt) + ' · ⏳ <span class="cd" data-dep="' + x.departureAt + '"></span></div>' +
+        '<div class="meta"><span class="badge">' + (x.seats - x.seatsLeft) + "/" + x.seats + " places réservées</span>" +
+        (x.status === "OPEN" ? "" : '<span class="badge full">Fermé</span>') +
+        '<span class="hint">' + (names.length ? "Passagers : " + esc(names.join(", ")) : "Pas encore de passager") + "</span></div>" +
+        '<div class="actions"><button class="btn ghost small" data-act="price" data-ride="' + x.id + '" data-price="' + x.price + '">Changer le prix</button>' +
+        '<button class="btn ghost small" data-act="toggle" data-ride="' + x.id + '" data-status="' + x.status + '">' + (x.status === "OPEN" ? "Fermer les réservations" : "Rouvrir") + "</button>" +
+        '<button class="btn danger small" data-act="delride" data-ride="' + x.id + '">Annuler le trajet</button></div></article>');
+    });
+    $("mlist").innerHTML = html.length ? html.join("") : '<div class="empty"><b>Aucun trajet proposé</b>Tu pars bientôt ? Publie tes places libres.</div>';
+  }
+  setTimeout(tick, 0);
+}
+
+/* ================= vue : classement ================= */
+async function viewTop() {
+  $("view").innerHTML = '<h2 class="title">Blasa en chiffres</h2><div class="tiles" id="tiles"></div>' +
+    '<h2 class="title">Les conducteurs les mieux notés 🏆</h2><div class="list" id="ranks"></div>';
+  const [s, t] = await Promise.all([
+    api("GET", "/stats/summary", undefined, { note: "<code>HGETALL stats:summary</code>" }),
+    api("GET", "/stats/top-drivers?limit=5", undefined, { note: "<code>ZREVRANGE leaderboard:drivers 0 4 WITHSCORES</code>" })]);
+  const d = s.data || {};
+  $("tiles").innerHTML = [["ridesCreated", "trajets proposés"], ["bookings", "places réservées"], ["ratings", "notes données"]]
+    .map((x) => '<div class="tile"><b>' + (d[x[0]] || 0) + "</b><span>" + x[1] + "</span></div>").join("");
+  $("ranks").innerHTML = (t.data || []).map((r, i) => '<div class="rank"><span class="n">' + (i + 1) + "</span>" + avatar(userById(r.userId) || { name: r.name }) +
+    '<span class="who">' + esc(r.name) + "</span>" + stars(r.averageRating, r.ratingCount) + "</div>").join("") ||
+    '<div class="empty"><b>Pas encore de notes</b>Réserve un trajet puis note ton conducteur.</div>';
+}
+
+/* ================= vue : mon profil ================= */
+function viewProfile() {
+  $("view").innerHTML = '<h2 class="title">Mon profil</h2><div class="panel form">' +
+    '<div class="profile-head">' + avatar(me, true) + "<div><h2>" + esc(me.name) + "</h2>" + stars(me.averageRating, me.ratingCount) + "</div></div>" +
+    '<form id="pform" class="form" style="max-width:none">' +
+    '<label class="f">Prénom<input id="p-name" value="' + esc(me.name) + '" required></label>' +
+    '<label class="f">Email<input id="p-email" type="email" value="' + esc(me.email) + '" required></label>' +
+    '<label class="f">Ville<select id="p-city">' + cityOptions(me.city) + "</select></label>" +
+    '<button class="btn">Enregistrer</button></form>' +
+    '<div class="actions"><button class="btn ghost" data-act="switch">Changer de profil</button>' +
+    '<button class="btn danger" data-act="delme">Supprimer mon compte</button></div></div>';
+  $("pform").onsubmit = async (e) => {
+    e.preventDefault();
+    const r = await api("PUT", "/users/" + me.id, { name: $("p-name").value.trim(), email: $("p-email").value.trim(), city: $("p-city").value },
+      { note: "<code>HSET user:" + me.id + "</code> (3 champs)" });
+    if (!r.ok) return toast((r.data && r.data.error) || "Enregistrement impossible", true);
+    await loadUsers(); setMe(userById(me.id)); go("profile"); toast("Profil mis à jour.");
+  };
+}
+
+/* ================= actions (boutons) ================= */
+const actions = {
+  pick(d) { setMe(userById(Number(d.id))); },
+  async book(d) {
+    const r = await api("POST", "/rides/" + d.ride + "/bookings", { userId: me.id }, { note: "<code>HINCRBY ride:" + d.ride + " seatsLeft -1</code> (atomique), <code>SADD …:passengers</code>" });
+    toast(r.ok ? "Place réservée ! Bon voyage 🎉" : ((r.data && r.data.error) || "Réservation impossible"), !r.ok); refresh();
+  },
+  async unbook(d) {
+    const r = await api("DELETE", "/rides/" + d.ride + "/bookings/" + me.id, undefined, { note: "<code>SREM …:passengers</code>, <code>HINCRBY seatsLeft +1</code>" });
+    toast(r.ok ? "Réservation annulée." : "Annulation impossible", !r.ok); refresh();
+  },
+  async rate(d) {
+    const r = await api("POST", "/users/" + d.user + "/ratings", { score: Number(d.score) }, { note: "<code>HINCRBY user:… ratingSum</code>, <code>ZADD leaderboard:drivers</code>" });
+    if (r.ok) { rated.add(Number(d.ride)); await loadUsers(); toast("Merci pour ta note !"); } else toast((r.data && r.data.error) || "Note impossible", true);
+    refresh();
+  },
+  async price(d) {
+    const v = prompt("Nouveau prix par place (DT) :", d.price); if (v === null || v.trim() === "") return;
+    const r = await api("PATCH", "/rides/" + d.ride, { price: Number(v) }, { note: "<code>HSET ride:" + d.ride + " price</code>" });
+    toast(r.ok ? "Prix mis à jour." : ((r.data && r.data.error) || "Modification impossible"), !r.ok); refresh();
+  },
+  async toggle(d) {
+    const r = await api("PATCH", "/rides/" + d.ride, { status: d.status === "OPEN" ? "CLOSED" : "OPEN" }, { note: "<code>HSET ride:" + d.ride + " status</code>" });
+    toast(r.ok ? "Trajet mis à jour." : "Modification impossible", !r.ok); refresh();
+  },
+  async delride(d) {
+    if (!confirm("Annuler ce trajet pour tous les passagers ?")) return;
+    const r = await api("DELETE", "/rides/" + d.ride, undefined, { note: "<code>SREM</code> index, <code>ZREM rides:geo</code>, <code>DEL ride:" + d.ride + "</code>" });
+    toast(r.ok ? "Trajet annulé." : "Annulation impossible", !r.ok); refresh();
+  },
+  async switch() { await loadUsers(); showWelcome(); },
+  async delme() {
+    if (!confirm("Supprimer définitivement ton compte ?")) return;
+    const r = await api("DELETE", "/users/" + me.id, undefined, { note: "<code>ZREM leaderboard:drivers</code>, <code>DEL user:" + me.id + "</code>" });
+    if (!r.ok) return toast("Suppression impossible", true);
+    store.del("blasa.me"); me = null; $("me-chip").hidden = true; await loadUsers(); showWelcome(); toast("Compte supprimé.");
+  }
+};
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-act]"); if (b && actions[b.dataset.act]) actions[b.dataset.act](b.dataset); });
+
+/* ================= scenario de demo (mode technique) ================= */
+$("demo").onclick = async function () {
+  const btn = this; btn.disabled = true; $("log").innerHTML = "";
+  const step = async (m, p, b, note) => { const r = await api(m, p, b, { note }); await sleep(1300); return r; };
+  const dep = Math.floor(Date.now() / 1000) + 2 * 86400;
+  const u = await step("POST", "/users", { name: "Lina", email: "lina@mail.tn", city: "Sfax" }, "<code>INCR seq:user</code>, <code>HSET user:{id}</code>");
+  const uid = u.data && u.data.id;
+  await step("GET", "/users/" + uid, undefined, "<code>HGETALL user:" + uid + "</code>");
+  await step("PATCH", "/users/" + uid, { city: "Tunis" }, "<code>HSET user:" + uid + " city</code>");
+  await step("PUT", "/users/" + uid, { name: "Lina B.", email: "lina.b@mail.tn", city: "Sousse" }, "<code>HSET user:" + uid + "</code> (3 champs)");
+  const r = await step("POST", "/rides", { driverId: 2, origin: "Sfax", destination: "Tunis", departureAt: dep, seats: 1, price: 14 },
+    "<code>INCR seq:ride</code>, <code>HSET</code>, <code>EXPIREAT</code>, <code>GEOADD</code>, <code>SADD</code>");
+  const rid = r.data && r.data.id;
+  await step("GET", "/rides?from=sfax&to=tunis", undefined, "<code>SINTER rides:from:sfax rides:to:tunis</code>");
+  await step("GET", "/rides?lat=34.74&lon=10.76&radius=50", undefined, "<code>GEOSEARCH rides:geo … BYRADIUS 50 KM ASC</code>");
+  await step("POST", "/rides/" + rid + "/bookings", { userId: uid }, "<code>HINCRBY seatsLeft -1</code>, <code>SADD passengers</code>");
+  await step("POST", "/rides/" + rid + "/bookings", { userId: uid }, "<code>SISMEMBER</code> → déjà réservé (409)");
+  await step("PATCH", "/rides/" + rid, { price: 16 }, "<code>HSET ride:" + rid + " price</code>");
+  await step("POST", "/users/2/ratings", { score: 5 }, "<code>HINCRBY</code>, <code>ZADD leaderboard:drivers</code>");
+  await step("GET", "/stats/top-drivers?limit=3", undefined, "<code>ZREVRANGE leaderboard:drivers 0 2 WITHSCORES</code>");
+  await step("DELETE", "/rides/" + rid + "/bookings/" + uid, undefined, "<code>SREM</code>, <code>HINCRBY +1</code>");
+  await step("DELETE", "/rides/" + rid, undefined, "<code>SREM</code>, <code>ZREM</code>, <code>DEL</code>");
+  await step("DELETE", "/users/" + uid, undefined, "<code>DEL user:" + uid + "</code>");
+  await step("GET", "/users/" + uid, undefined, "clé absente → 404");
+  await loadUsers(); btn.disabled = false; if (me) refresh();
+};
+
+/* ================= rafraichir la vue courante sans tout reconstruire ================= */
+function refresh() {
+  if (!me) return;
+  const f = { search: () => (lastSearch ? runSearch(lastSearch) : doSearch(false)), map: () => mapRefresh(false), mine: viewMine, top: viewTop }[currentView];
+  if (f) f();
+}
+
+/* ================= compte a rebours : le TTL de Redis, vu de l'ecran ================= */
+let goneTimer = null;
+function tick() {
+  const now = Date.now() / 1000;
+  document.querySelectorAll(".cd").forEach((el) => {
+    const rem = Number(el.dataset.dep) - now;
+    if (rem <= 0) {
+      el.textContent = "parti"; el.className = "cd";
+      const card = el.closest(".ride, .mini");
+      if (card && !card.classList.contains("gone")) {
+        card.classList.add("gone");
+        toast("⏰ Trajet" + (card.dataset.rid ? " #" + card.dataset.rid : "") + " parti : Redis l'a supprimé tout seul (EXPIREAT).");
+        clearTimeout(goneTimer); goneTimer = setTimeout(refresh, 1800);
+      }
+      return;
+    }
+    const d = Math.floor(rem / 86400), h = Math.floor((rem % 86400) / 3600), m = Math.floor((rem % 3600) / 60), s = Math.floor(rem % 60);
+    const p = (n) => String(n).padStart(2, "0");
+    el.textContent = d > 0 ? d + " j " + h + " h " + p(m) + " min" : p(h) + ":" + p(m) + ":" + p(s);
+    el.className = "cd" + (rem < 60 ? " urgent" : rem < 3600 ? " soon" : "");
+  });
+}
+setInterval(tick, 1000);
+
+/* ================= flux en direct : Redis Pub/Sub -> API -> SSE -> navigateur ================= */
+function setLive(on) { $("live").classList.toggle("on", on); $("live").lastElementChild.textContent = on ? "En direct" : "Reconnexion…"; }
+function logEvent(raw) {
+  const el = $("evlog"); if (el.querySelector(".hint")) el.innerHTML = "";
+  const d = document.createElement("div"); d.className = "ev"; d.textContent = new Date().toLocaleTimeString("fr-FR") + "  " + raw;
+  el.insertBefore(d, el.firstChild);
+  while (el.children.length > 30) el.lastChild.remove();
+}
+let liveTimer = null;
+function onLiveEvent(ev, raw) {
+  logEvent(raw);
+  const own = (me && ev.userId === me.id) || Date.now() - lastOwn < 1500;     // pas de notification pour sa propre action
+  const who = (userById(ev.userId) || {}).name || "Quelqu'un";
+  if (!own) {
+    if (ev.type === "booked") toast("🔔 " + who + " vient de réserver le trajet #" + ev.rideId + " (" + ev.seatsLeft + " place" + (ev.seatsLeft > 1 ? "s" : "") + " restante" + (ev.seatsLeft > 1 ? "s" : "") + ")");
+    else if (ev.type === "booking_cancelled") toast("↩️ Une place vient de se libérer sur le trajet #" + ev.rideId);
+    else if (ev.type === "ride_created") toast("🆕 Nouveau trajet : " + cityLabel(ev.origin) + " → " + cityLabel(ev.destination));
+    else if (ev.type === "ride_deleted") toast("🗑️ Le trajet #" + ev.rideId + " a été annulé");
+    else if (ev.type === "rated") toast("⭐ Un conducteur vient d'être noté");
+  }
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(async () => {
+    await loadUsers(); refresh();
+    if (ev.rideId) setTimeout(() => document.querySelectorAll('[data-rid="' + ev.rideId + '"]').forEach((c) => {
+      c.classList.add("flash"); setTimeout(() => c.classList.remove("flash"), 1900);
+    }), 700);
+  }, 250);
+}
+function connectLive() {
+  if (!window.EventSource) return;
+  const es = new EventSource(API + "/events");
+  es.addEventListener("hello", () => setLive(true));
+  es.addEventListener("ping", () => setLive(true));
+  es.addEventListener("blasa", (e) => { setLive(true); let ev; try { ev = JSON.parse(e.data); } catch (x) { return; } onLiveEvent(ev, e.data); });
+  es.onerror = () => setLive(false);
+}
+
+/* ================= carte interactive : Leaflet + GEOSEARCH ================= */
+// [latitude, longitude] de chaque ville (meme table que cote serveur)
+const COORDS = { tunis: [36.8065, 10.1815], ariana: [36.8665, 10.1647], bizerte: [37.2744, 9.8739], nabeul: [36.4513, 10.7357], hammamet: [36.4, 10.6167],
+  zaghouan: [36.4029, 10.1429], beja: [36.7256, 9.1817], jendouba: [36.5011, 8.7802], kef: [36.1826, 8.7148], sousse: [35.8256, 10.6411],
+  monastir: [35.7643, 10.8113], mahdia: [35.5047, 11.0622], kairouan: [35.6781, 10.0963], kasserine: [35.1676, 8.8365], sidibouzid: [35.0382, 9.4849],
+  sfax: [34.7406, 10.76], gafsa: [34.425, 8.7842], gabes: [33.8815, 10.0982], medenine: [33.3549, 10.5055], djerba: [33.8076, 10.8451],
+  tozeur: [33.9197, 8.1335], tataouine: [32.9297, 10.4518] };
+let map = null, mapLayer = null, mapCircle = null, mapCenter = null, mapRadius = 50;
+
+async function getPos() {
+  try {
+    const p = await new Promise((ok, ko) => navigator.geolocation ? navigator.geolocation.getCurrentPosition(ok, ko, { timeout: 4000 }) : ko());
+    return [p.coords.latitude, p.coords.longitude];
+  } catch (e) { toast("Position indisponible : on prend Sfax."); return COORDS.sfax.slice(); }
+}
+const canBook = (r) => me && r.driverId !== me.id && r.status === "OPEN" && r.seatsLeft > 0 && !(r.passengers || []).includes(me.id);
+function popupHtml(r, dist) {
+  const drv = userById(r.driverId);
+  return "<b>" + esc(cityLabel(r.origin)) + " → " + esc(cityLabel(r.destination)) + "</b><br>" + fmtDate(r.departureAt) + '<br>⏳ <span class="cd" data-dep="' + r.departureAt + '"></span><br>' +
+    r.price + " DT · " + r.seatsLeft + "/" + r.seats + " places<br>" + esc(drv ? drv.name : "") + (dist !== undefined ? " · à " + dist + " km" : "") +
+    (canBook(r) ? '<br><button class="btn small" data-act="book" data-ride="' + r.id + '">Réserver</button>' : "");
+}
+function miniCard(r, dist) {
+  const drv = userById(r.driverId);
+  return '<div class="mini" data-rid="' + r.id + '"><div class="t"><span>' + esc(cityLabel(r.origin)) + " → " + esc(cityLabel(r.destination)) + "</span><span>" + r.price + " DT</span></div>" +
+    '<div class="s">' + esc(drv ? drv.name : "") + " · " + dist + " km · " + r.seatsLeft + " place" + (r.seatsLeft > 1 ? "s" : "") + ' · ⏳ <span class="cd" data-dep="' + r.departureAt + '"></span></div>' +
+    (canBook(r) ? '<button class="btn small" data-act="book" data-ride="' + r.id + '">Réserver</button>' : "") + "</div>";
+}
+
+function viewMap() {
+  $("view").innerHTML = '<h2 class="title">Carte des trajets</h2><p class="sub">Clique sur la carte : Redis cherche les trajets autour de ce point avec <b>GEOSEARCH</b>.</p>' +
+    '<div class="mapwrap"><div id="map"></div><aside><div class="panel">' +
+    '<b>Rayon : <span id="m-rv">' + mapRadius + '</span> km</b><input type="range" id="m-rad" min="5" max="300" step="5" value="' + mapRadius + '">' +
+    '<div class="chips">' + ["Sfax", "Tunis", "Sousse", "Gabes", "Bizerte"].map((c) => '<button class="chip" data-city="' + c + '">' + cityLabel(c) + "</button>").join("") + "</div>" +
+    '<div class="actions"><button class="btn ghost small" id="m-me">📍 Ma position</button><button class="btn ghost small" id="m-clear">Effacer</button></div>' +
+    '<div class="cmd" id="m-cmd">Clique sur la carte pour lancer une recherche autour d\'un point.</div></div><div id="m-list"></div></aside></div>';
+  if (typeof L === "undefined") {
+    $("map").innerHTML = '<div class="empty"><b>Carte indisponible</b>La carte a besoin d\'une connexion Internet (Leaflet et OpenStreetMap).</div>';
+    return;
+  }
+  map = L.map("map").setView([34.4, 9.6], 6);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+  mapLayer = L.layerGroup().addTo(map);
+  map.on("click", (e) => { mapCenter = [e.latlng.lat, e.latlng.lng]; mapRefresh(true); });
+  map.on("popupopen", () => setTimeout(tick, 0));
+  $("m-rad").oninput = (e) => { mapRadius = Number(e.target.value); $("m-rv").textContent = mapRadius; };
+  $("m-rad").onchange = () => { if (mapCenter) mapRefresh(true); };
+  document.querySelectorAll(".chip").forEach((b) => b.onclick = () => { mapCenter = COORDS[slug(b.dataset.city)].slice(); mapRefresh(true); });
+  $("m-me").onclick = async () => { mapCenter = await getPos(); mapRefresh(true); };
+  $("m-clear").onclick = () => { mapCenter = null; $("m-cmd").textContent = "Clique sur la carte pour lancer une recherche autour d'un point."; mapRefresh(false); };
+  mapRefresh(false);
+}
+
+async function mapRefresh(fit) {
+  if (!map) return;
+  const inside = new Map();
+  if (mapCenter) {
+    const lat = mapCenter[0].toFixed(4), lon = mapCenter[1].toFixed(4);
+    const r = await api("GET", "/rides?" + new URLSearchParams({ lat, lon, radius: String(mapRadius) }), undefined,
+      { note: "<code>GEOSEARCH rides:geo FROMLONLAT " + lon + " " + lat + " BYRADIUS " + mapRadius + " KM ASC WITHDIST</code>" });
+    (r.data || []).forEach((x) => inside.set(x.id, x.distanceKm));
+    if ($("m-cmd")) $("m-cmd").textContent = "GEOSEARCH rides:geo FROMLONLAT " + lon + " " + lat + " BYRADIUS " + mapRadius + " km ASC WITHDIST  →  " + inside.size + " trajet(s)";
+  }
+  const a = await api("GET", "/rides", undefined, mapCenter ? { quiet: true } : { note: "<code>ZRANGE rides:geo 0 -1</code>" });
+  const rides = await enrich(a.data || []);
+  if (!map) return;                                   // on a quitte la carte pendant le chargement
+  mapLayer.clearLayers();
+  if (mapCircle) { map.removeLayer(mapCircle); mapCircle = null; }
+  if (mapCenter) {
+    mapCircle = L.circle(mapCenter, { radius: mapRadius * 1000, color: "#0f766e", weight: 2, fillOpacity: 0.08 }).addTo(map);
+    L.circleMarker(mapCenter, { radius: 6, color: "#fff", weight: 2, fillColor: "#0f766e", fillOpacity: 1 }).addTo(mapLayer);
+    if (fit) map.fitBounds(mapCircle.getBounds(), { maxZoom: 9, padding: [20, 20] });
+  }
+  const used = {};
+  rides.forEach((r) => {
+    const o = COORDS[slug(r.origin)], d = COORDS[slug(r.destination)];
+    if (!o || !d) return;
+    const n = used[r.origin] = (used[r.origin] || 0) + 1;                       // decale un peu les trajets qui partent de la meme ville
+    const from = n === 1 ? o : [o[0] + 0.06 * Math.sin(n * 2.1), o[1] + 0.06 * Math.cos(n * 2.1)];
+    const color = r.seatsLeft <= 0 ? "#dc2626" : r.seatsLeft === 1 ? "#f59e0b" : "#0f766e";
+    const on = !mapCenter || inside.has(r.id);
+    L.polyline([from, d], { color, weight: on ? 3 : 1, opacity: on ? 0.75 : 0.25, dashArray: "6 6" }).addTo(mapLayer);
+    L.circleMarker(d, { radius: 4, color, weight: 1, fillColor: "#fff", fillOpacity: 1, opacity: on ? 1 : 0.3 }).addTo(mapLayer);
+    L.circleMarker(from, { radius: on ? 10 : 6, color: "#fff", weight: 2, fillColor: color, fillOpacity: on ? 1 : 0.4 })
+      .addTo(mapLayer).bindPopup(popupHtml(r, inside.get(r.id)));
+  });
+  const list = rides.filter((r) => inside.has(r.id)).sort((x, y) => inside.get(x.id) - inside.get(y.id));
+  if ($("m-list")) $("m-list").innerHTML = !mapCenter ? "" : list.length ? list.map((r) => miniCard(r, inside.get(r.id))).join("")
+    : '<div class="empty" style="margin-top:8px"><b>Aucun trajet</b>Agrandis le rayon ou clique ailleurs.</div>';
+  setTimeout(tick, 0);
+}
+
+/* ================= demarrage ================= */
+(async function init() {
+  connectLive();
+  await loadUsers();
+  const saved = Number(store.get("blasa.me"));
+  const u = saved ? userById(saved) : null;
+  if (u) setMe(u); else showWelcome();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+FLUSHDB
+SET seq:user 4
+SET seq:ride 8
+HSET user:1 name "Sarra" email "sarra@mail.tn" city sfax ratingSum 14 ratingCount 3
+HSET user:2 name "Ahmed" email "ahmed@mail.tn" city sfax ratingSum 9 ratingCount 2
+HSET user:3 name "Meriem" email "meriem@mail.tn" city sousse ratingSum 4 ratingCount 1
+HSET user:4 name "Yassine" email "yassine@mail.tn" city tunis ratingSum 0 ratingCount 0
+HSET ride:1 driverId 1 origin sfax destination tunis departureAt {{DEP1}} seats 3 seatsLeft 2 price 15 status OPEN
+HSET ride:2 driverId 2 origin sfax destination sousse departureAt {{DEP2}} seats 4 seatsLeft 4 price 8 status OPEN
+HSET ride:3 driverId 3 origin sousse destination tunis departureAt {{DEP3}} seats 3 seatsLeft 3 price 10 status OPEN
+HSET ride:4 driverId 2 origin tunis destination sfax departureAt {{DEP4}} seats 2 seatsLeft 2 price 15 status OPEN
+HSET ride:5 driverId 3 origin sfax destination tunis departureAt {{DEP5}} seats 3 seatsLeft 3 price 12 status OPEN
+HSET ride:6 driverId 1 origin gabes destination sfax departureAt {{DEP6}} seats 3 seatsLeft 3 price 9 status OPEN
+HSET ride:7 driverId 4 origin tunis destination bizerte departureAt {{DEP7}} seats 2 seatsLeft 2 price 5 status OPEN
+HSET ride:8 driverId 2 origin monastir destination tunis departureAt {{DEP8}} seats 4 seatsLeft 3 price 9 status OPEN
+EXPIREAT ride:1 {{DEP1}}
+EXPIREAT ride:2 {{DEP2}}
+EXPIREAT ride:3 {{DEP3}}
+EXPIREAT ride:4 {{DEP4}}
+EXPIREAT ride:5 {{DEP5}}
+EXPIREAT ride:6 {{DEP6}}
+EXPIREAT ride:7 {{DEP7}}
+EXPIREAT ride:8 {{DEP8}}
+GEOADD rides:geo 10.7600 34.7406 ride:1 10.7650 34.7450 ride:2 10.6411 35.8256 ride:3 10.1815 36.8065 ride:4 10.7550 34.7350 ride:5 10.0982 33.8815 ride:6 10.1900 36.8100 ride:7 10.8113 35.7643 ride:8
+SADD rides:from:sfax ride:1 ride:2 ride:5
+SADD rides:from:sousse ride:3
+SADD rides:from:tunis ride:4 ride:7
+SADD rides:from:gabes ride:6
+SADD rides:from:monastir ride:8
+SADD rides:to:tunis ride:1 ride:3 ride:5 ride:8
+SADD rides:to:sousse ride:2
+SADD rides:to:sfax ride:4 ride:6
+SADD rides:to:bizerte ride:7
+SADD ride:1:passengers 4
+SADD ride:8:passengers 3
+EXPIREAT ride:1:passengers {{DEP1}}
+EXPIREAT ride:8:passengers {{DEP8}}
+ZADD leaderboard:drivers 4.67 1 4.5 2 4.0 3
+HSET stats:summary ridesCreated 8 bookings 2 ratings 6
