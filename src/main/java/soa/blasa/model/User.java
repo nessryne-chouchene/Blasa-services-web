@@ -1,6 +1,7 @@
 package soa.blasa.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 /** Un utilisateur Blasa (conducteur et/ou passager). Stocke dans Redis : HASH user:{id}. */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -13,6 +14,10 @@ public class User {
     private int ratingSum;
     private int ratingCount;
 
+    // Uniquement a l'entree (jamais renvoye) : stocke sous forme de hash PBKDF2 dans Redis
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private String password;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -24,6 +29,9 @@ public class User {
 
     public String getCity() { return city; }
     public void setCity(String city) { this.city = city; }
+
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
 
     public int getRatingSum() { return ratingSum; }
     public void setRatingSum(int ratingSum) { this.ratingSum = ratingSum; }

@@ -19,3 +19,7 @@ redis/01_seed.redis
 .classpath
 .project
 .settings/
+
+# certificats HTTPS (ne jamais publier une cle privee)
+*.p12
+*.jks

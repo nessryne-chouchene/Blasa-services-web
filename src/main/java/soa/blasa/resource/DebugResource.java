@@ -60,7 +60,11 @@ public class DebugResource {
             case "string":
                 return redis.get(key);
             case "hash":
-                return new java.util.TreeMap<>(redis.hgetAll(key));
+                Map<String, String> fields = new java.util.TreeMap<>(redis.hgetAll(key));
+                if (fields.containsKey("pwHash")) {
+                    fields.put("pwHash", "***");                 // le hash du mot de passe n'est jamais expose
+                }
+                return fields;
             case "set":
                 return new TreeSet<>(redis.smembers(key));
             case "zset":

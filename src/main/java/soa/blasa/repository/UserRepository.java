@@ -10,6 +10,7 @@ import redis.clients.jedis.Jedis;
 import redis.clients.jedis.params.ScanParams;
 import redis.clients.jedis.resps.ScanResult;
 import soa.blasa.model.User;
+import soa.blasa.security.PasswordHasher;
 
 /** Acces a Redis pour les utilisateurs : cle user:{id} de type HASH. */
 public class UserRepository {
@@ -28,8 +29,29 @@ public class UserRepository {
             fields.put("city", u.getCity().toLowerCase());
             fields.put("ratingSum", "0");
             fields.put("ratingCount", "0");
+            if (u.getPassword() != null && !u.getPassword().isBlank()) {
+                fields.put("pwHash", PasswordHasher.hash(u.getPassword()));
+            }
             redis.hset(key(id), fields);
             return find(id);
+        }
+    }
+
+    /** Definit (ou change) le mot de passe : seul le hash est stocke. false si l'utilisateur n'existe pas. */
+    public boolean setPassword(long id, String password) {
+        try (Jedis redis = RedisConfig.pool().getResource()) {
+            if (!redis.exists(key(id))) {
+                return false;
+            }
+            redis.hset(key(id), "pwHash", PasswordHasher.hash(password));
+            return true;
+        }
+    }
+
+    /** Hash du mot de passe, ou null si l'utilisateur n'en a pas (comptes de demo). */
+    public String passwordHash(long id) {
+        try (Jedis redis = RedisConfig.pool().getResource()) {
+            return redis.hget(key(id), "pwHash");
         }
     }
 

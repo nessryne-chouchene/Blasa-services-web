@@ -12,11 +12,13 @@ import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 import soa.blasa.model.User;
 import soa.blasa.repository.UserRepository;
+import soa.blasa.security.PasswordHasher;
 
 /** Ressource REST /api/users : les 5 methodes HTTP du cours sur un meme objet. */
 @Path("/users")
@@ -34,20 +36,34 @@ public class UserResource {
         return s == null || s.isBlank();
     }
 
+    /** Message d'erreur si le mot de passe fourni est trop court (absent = autorise), sinon null. */
+    private static String passwordError(String password) {
+        if (password != null && password.length() < PasswordHasher.MIN_LENGTH) {
+            return "password doit faire au moins " + PasswordHasher.MIN_LENGTH + " caracteres";
+        }
+        return null;
+    }
+
     /** POST /users : creer un compte -> 201 Created (+ en-tete Location) ou 400. */
     @POST
     public Response create(User body) {
         if (body == null || blank(body.getName()) || blank(body.getEmail()) || blank(body.getCity())) {
             return error(Response.Status.BAD_REQUEST, "name, email et city sont obligatoires");
         }
+        if (passwordError(body.getPassword()) != null) {
+            return error(Response.Status.BAD_REQUEST, passwordError(body.getPassword()));
+        }
         User created = repo.create(body);
         return Response.created(URI.create("/api/users/" + created.getId())).entity(created).build();
     }
 
-    /** GET /users : liste de tous les utilisateurs -> 200. */
+    /**
+     * GET /users : liste des utilisateurs -> 200.
+     * Pagination optionnelle : ?page=1&size=20 (voir PagedResponse). Sans parametre : tous les utilisateurs.
+     */
     @GET
-    public Response list() {
-        return Response.ok(repo.findAll()).build();
+    public Response list(@QueryParam("page") Integer page, @QueryParam("size") Integer size) {
+        return PagedResponse.of(repo.findAll(), page, size);
     }
 
     /** GET /users/{id} : lire un profil -> 200 ou 404. */
@@ -68,6 +84,9 @@ public class UserResource {
         if (body == null || blank(body.getName()) || blank(body.getEmail()) || blank(body.getCity())) {
             return error(Response.Status.BAD_REQUEST, "PUT exige name, email et city");
         }
+        if (passwordError(body.getPassword()) != null) {
+            return error(Response.Status.BAD_REQUEST, passwordError(body.getPassword()));
+        }
         Map<String, String> fields = new HashMap<>();
         fields.put("name", body.getName());
         fields.put("email", body.getEmail());
@@ -75,6 +94,9 @@ public class UserResource {
         User u = repo.update(id, fields);
         if (u == null) {
             return error(Response.Status.NOT_FOUND, "utilisateur " + id + " introuvable");
+        }
+        if (!blank(body.getPassword())) {          // PUT peut aussi (re)definir le mot de passe
+            repo.setPassword(id, body.getPassword());
         }
         return Response.ok(u).build();
     }
@@ -95,12 +117,19 @@ public class UserResource {
                 fields.put(f, changes.get(f));
             }
         }
-        if (fields.isEmpty()) {
-            return error(Response.Status.BAD_REQUEST, "champs modifiables : name, email, city");
+        String password = changes.get("password");
+        if (password != null && passwordError(password) != null) {
+            return error(Response.Status.BAD_REQUEST, passwordError(password));
         }
-        User u = repo.update(id, fields);
+        if (fields.isEmpty() && password == null) {
+            return error(Response.Status.BAD_REQUEST, "champs modifiables : name, email, city, password");
+        }
+        User u = fields.isEmpty() ? repo.find(id) : repo.update(id, fields);
         if (u == null) {
             return error(Response.Status.NOT_FOUND, "utilisateur " + id + " introuvable");
+        }
+        if (password != null) {
+            repo.setPassword(id, password);
         }
         return Response.ok(u).build();
     }
