@@ -46,10 +46,29 @@
       <artifactId>jedis</artifactId>
       <version>5.1.0</version>
     </dependency>
+
+    <!-- Tests automatises (mvn test) : JUnit 5 -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
     <plugins>
+      <!-- mvn test : les tests utilisent la base Redis numero 15 (jamais la 0 des donnees de demo) -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+        <configuration>
+          <systemPropertyVariables>
+            <blasa.redis.db>15</blasa.redis.db>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
       <!-- Lancer avec : mvn compile exec:java -->
       <plugin>
         <groupId>org.codehaus.mojo</groupId>

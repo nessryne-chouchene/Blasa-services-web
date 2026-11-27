@@ -1,0 +1,625 @@
+openapi: 3.0.3
+info:
+  title: Blasa API
+  version: "1.0"
+  description: |
+    API REST de **Blasa**, application de covoiturage étudiant en Tunisie
+    (module Services Web, Faculté des Sciences de Sfax).
+
+    - Format des échanges : **JSON** sur **HTTP** (les erreurs ont la forme `{"error": "message"}`).
+    - Les données sont stockées dans **Redis** (hashes, sets, sorted sets, GEO, Pub/Sub, TTL).
+    - Les dates (`departureAt`) sont des timestamps Unix en **secondes**.
+    - **Authentification (optionnelle)** : par défaut l'API est ouverte. Avec `AUTH_ENABLED=true` au démarrage,
+      les écritures exigent un jeton JWT (`POST /auth/login`, puis en-tête `Authorization: Bearer <jeton>`) ;
+      les lectures (`GET`) et l'inscription (`POST /users`) restent publiques.
+    - **Pagination (optionnelle)** : `GET /users` et `GET /rides` acceptent `page` et `size`. Sans ces paramètres,
+      la liste complète est renvoyée comme avant.
+servers:
+  - url: /api
+    description: Serveur local (même hôte que cette page)
+security:
+  - {}
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Connexion (jeton JWT), utile seulement si AUTH_ENABLED=true
+  - name: Users
+    description: Comptes utilisateurs (conducteurs et passagers)
+  - name: Rides
+    description: Trajets proposés par les conducteurs
+  - name: Bookings
+    description: Réservations de places sur un trajet
+  - name: Ratings
+    description: Notes attribuées aux conducteurs
+  - name: Stats
+    description: Classement et compteurs globaux (lecture seule)
+  - name: Events
+    description: Flux en direct (Server-Sent Events)
+  - name: Debug
+    description: Outil de démonstration, hors API métier
+
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Se connecter (obtenir un jeton JWT)
+      description: |
+        Renvoie un jeton à mettre dans l'en-tête `Authorization: Bearer <jeton>`.
+        Le compte doit avoir un mot de passe (champ `password` à la création, ou via `PATCH /users/{id}`).
+        Les comptes de démonstration n'en ont pas au départ.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, example: amine@example.tn }
+                password: { type: string, format: password, example: motdepasse123 }
+      responses:
+        '200':
+          description: Connexion réussie
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string, description: "Jeton JWT (HS256)" }
+                  tokenType: { type: string, example: Bearer }
+                  expiresIn: { type: integer, description: "Durée de validité en secondes", example: 3600 }
+                  userId: { type: integer, format: int64 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users:
+    post:
+      tags: [Users]
+      summary: Créer un compte
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserInput' }
+            example: { name: "Amine Ben Salah", email: "amine@example.tn", city: "Sfax" }
+      responses:
+        '201':
+          description: Compte créé
+          headers:
+            Location:
+              description: URI du nouvel utilisateur
+              schema: { type: string, example: /api/users/9 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    get:
+      tags: [Users]
+      summary: Lister les utilisateurs
+      description: Sans paramètre, tous les utilisateurs. Avec `page` et/ou `size`, une seule page (toujours un tableau JSON).
+      operationId: listUsers
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: Liste des utilisateurs (ou la page demandée)
+          headers:
+            X-Total-Count: { $ref: '#/components/headers/TotalCount' }
+            X-Total-Pages: { $ref: '#/components/headers/TotalPages' }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [Users]
+      summary: Lire un profil
+      operationId: getUser
+      responses:
+        '200':
+          description: Profil de l'utilisateur
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Users]
+      summary: Remplacer un profil (name, email et city obligatoires)
+      operationId: replaceUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserInput' }
+      responses:
+        '200':
+          description: Profil remplacé
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Users]
+      summary: Modifier partiellement un profil
+      description: Seuls les champs `name`, `email` et `city` sont modifiables ; ils ne peuvent pas être vides.
+      operationId: patchUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserPatch' }
+            example: { city: "Tunis" }
+      responses:
+        '200':
+          description: Profil modifié
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Users]
+      summary: Supprimer un compte
+      operationId: deleteUser
+      responses:
+        '204': { description: "Compte supprimé (pas de corps)" }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{id}/ratings:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [Ratings]
+      summary: Noter un conducteur (1 à 5)
+      operationId: rateUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [score]
+              properties:
+                score: { type: integer, minimum: 1, maximum: 5, example: 5 }
+      responses:
+        '201':
+          description: Note enregistrée
+          headers:
+            Location:
+              description: URI du profil noté
+              schema: { type: string, example: /api/users/2 }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId: { type: integer, format: int64 }
+                  score: { type: integer }
+                  averageRating: { type: number, format: double, description: "Note moyenne mise à jour" }
+                  ratingCount: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rides:
+    post:
+      tags: [Rides]
+      summary: Proposer un trajet
+      description: |
+        Les villes sont normalisées (slug). Si `originLat`/`originLon` sont absents,
+        la position est déduite de la ville de départ (sinon erreur 400 pour une ville inconnue).
+      operationId: createRide
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RideInput' }
+            example:
+              driverId: 1
+              origin: sfax
+              destination: tunis
+              departureAt: 1893456000
+              seats: 3
+              price: 25
+      responses:
+        '201':
+          description: Trajet créé
+          headers:
+            Location:
+              description: URI du nouveau trajet
+              schema: { type: string, example: /api/rides/9 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ride' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: Conducteur introuvable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [Rides]
+      summary: Chercher des trajets
+      description: |
+        Trois modes : par villes (`from`, `to`), autour d'un point (`lat`, `lon`, `radius` – GEOSEARCH Redis),
+        ou sans paramètre (tous les trajets). `lat` et `lon` vont ensemble.
+        `page` et `size` (optionnels) se combinent avec les trois modes.
+      operationId: searchRides
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - { name: from, in: query, description: "Ville de départ", schema: { type: string, example: sfax } }
+        - { name: to, in: query, description: "Ville d'arrivée", schema: { type: string, example: tunis } }
+        - { name: lat, in: query, description: "Latitude du centre de recherche", schema: { type: number, format: double, example: 34.74 } }
+        - { name: lon, in: query, description: "Longitude du centre de recherche", schema: { type: number, format: double, example: 10.76 } }
+        - name: radius
+          in: query
+          description: Rayon de recherche en kilomètres (strictement positif)
+          schema: { type: number, format: double, default: 50, exclusiveMinimum: true, minimum: 0 }
+      responses:
+        '200':
+          description: Trajets trouvés (avec `distanceKm` pour une recherche géographique)
+          headers:
+            X-Total-Count: { $ref: '#/components/headers/TotalCount' }
+            X-Total-Pages: { $ref: '#/components/headers/TotalPages' }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Ride' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /rides/{id}:
+    parameters:
+      - $ref: '#/components/parameters/RideId'
+    get:
+      tags: [Rides]
+      summary: Détail d'un trajet (avec la liste des passagers)
+      operationId: getRide
+      responses:
+        '200':
+          description: Détail du trajet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ride' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Rides]
+      summary: Remplacer prix, places et date de départ
+      description: Les trois champs sont obligatoires.
+      operationId: replaceRide
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RideReplace' }
+      responses:
+        '200':
+          description: Trajet modifié
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ride' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    patch:
+      tags: [Rides]
+      summary: Modifier partiellement un trajet
+      description: |
+        Champs modifiables : `price`, `seats`, `departureAt`, `status`. Les autres sont ignorés.
+        Les valeurs peuvent être envoyées sous forme de nombres ou de chaînes.
+      operationId: patchRide
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RidePatch' }
+            example: { price: 30 }
+      responses:
+        '200':
+          description: Trajet modifié
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ride' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Rides]
+      summary: Annuler un trajet
+      operationId: deleteRide
+      responses:
+        '204': { description: "Trajet annulé (pas de corps)" }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /rides/{rideId}/bookings:
+    parameters:
+      - { name: rideId, in: path, required: true, description: "Identifiant du trajet", schema: { type: integer, format: int64, example: 1 } }
+    post:
+      tags: [Bookings]
+      summary: Réserver une place
+      description: Le conducteur ne peut pas réserver son propre trajet. Une place est retirée de `seatsLeft`.
+      operationId: bookRide
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: { type: integer, format: int64, example: 3 }
+      responses:
+        '201':
+          description: Réservation créée
+          headers:
+            Location:
+              description: URI du trajet réservé
+              schema: { type: string, example: /api/rides/1 }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rideId: { type: integer, format: int64 }
+                  userId: { type: integer, format: int64 }
+                  seatsLeft: { type: integer, description: "Places restantes après réservation" }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: Trajet ou utilisateur introuvable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /rides/{rideId}/bookings/{userId}:
+    delete:
+      tags: [Bookings]
+      summary: Annuler une réservation
+      operationId: cancelBooking
+      parameters:
+        - { name: rideId, in: path, required: true, description: "Identifiant du trajet", schema: { type: integer, format: int64, example: 1 } }
+        - { name: userId, in: path, required: true, description: "Identifiant du passager", schema: { type: integer, format: int64, example: 3 } }
+      responses:
+        '204': { description: "Réservation annulée (pas de corps)" }
+        '404':
+          description: Trajet introuvable, ou pas de réservation de cet utilisateur sur ce trajet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /stats/top-drivers:
+    get:
+      tags: [Stats]
+      summary: Meilleurs conducteurs (classement par note moyenne)
+      operationId: topDrivers
+      parameters:
+        - { name: limit, in: query, description: "Nombre de conducteurs à renvoyer", schema: { type: integer, minimum: 1, maximum: 50, default: 3 } }
+      responses:
+        '200':
+          description: Classement du meilleur au moins bon
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    userId: { type: integer, format: int64 }
+                    name: { type: string }
+                    averageRating: { type: number, format: double }
+                    ratingCount: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /stats/summary:
+    get:
+      tags: [Stats]
+      summary: Compteurs globaux
+      operationId: statsSummary
+      responses:
+        '200':
+          description: Compteurs (au minimum ridesCreated, bookings, ratings)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: { type: integer, format: int64 }
+                example: { ridesCreated: 8, bookings: 5, ratings: 12 }
+
+  /events:
+    get:
+      tags: [Events]
+      summary: Flux d'événements en direct (SSE)
+      description: |
+        Connexion HTTP qui reste ouverte. Le serveur envoie un événement `hello` à la connexion,
+        un événement `blasa` à chaque action (réservation, nouveau trajet, note…, via Redis Pub/Sub)
+        et un `ping` toutes les 20 secondes. Swagger UI ne sait pas afficher ce flux ; testez-le avec
+        `curl -N http://localhost:8080/api/events`.
+      operationId: streamEvents
+      responses:
+        '200':
+          description: Flux `text/event-stream`
+          content:
+            text/event-stream:
+              schema: { type: string }
+
+  /debug/redis:
+    get:
+      tags: [Debug]
+      summary: Contenu réel de Redis (démonstration)
+      description: Liste toutes les clés avec leur type, leur TTL et leur contenu. Lecture seule.
+      operationId: debugRedis
+      responses:
+        '200':
+          description: Clés Redis
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key: { type: string, example: "ride:1" }
+                    type: { type: string, example: hash }
+                    ttl: { type: integer, description: "-1 si pas d'expiration" }
+                    value: { description: "Contenu (forme variable selon le type)" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Jeton obtenu avec POST /auth/login (exigé pour les écritures seulement si AUTH_ENABLED=true).
+  headers:
+    TotalCount:
+      description: Nombre total d'éléments (présent seulement si `page` ou `size` est fourni)
+      schema: { type: integer }
+    TotalPages:
+      description: Nombre total de pages (présent seulement si `page` ou `size` est fourni)
+      schema: { type: integer }
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: Numéro de page, à partir de 1 (active la pagination)
+      schema: { type: integer, minimum: 1, example: 1 }
+    Size:
+      name: size
+      in: query
+      description: Éléments par page (défaut 20, maximum 100 ; active la pagination)
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    UserId:
+      name: id
+      in: path
+      required: true
+      description: Identifiant de l'utilisateur
+      schema: { type: integer, format: int64, example: 1 }
+    RideId:
+      name: id
+      in: path
+      required: true
+      description: Identifiant du trajet
+      schema: { type: integer, format: int64, example: 1 }
+
+  responses:
+    Unauthorized:
+      description: Jeton manquant ou invalide (ou identifiants incorrects pour /auth/login)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Action réservée au propriétaire de la ressource (authentification active)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BadRequest:
+      description: Requête invalide (champ manquant, valeur hors limites…)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: "seats doit etre entre 1 et 8" }
+    NotFound:
+      description: Ressource introuvable
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: "trajet 42 introuvable" }
+    Conflict:
+      description: Conflit avec l'état actuel (plus de places, déjà réservé…)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string, description: "Message d'erreur" }
+      required: [error]
+
+    UserInput:
+      type: object
+      required: [name, email, city]
+      properties:
+        name: { type: string, example: Amine Ben Salah }
+        email: { type: string, example: amine@example.tn }
+        city: { type: string, example: Sfax }
+        password: { type: string, format: password, minLength: 8, writeOnly: true, description: "Optionnel, 8 caractères minimum ; stocké haché, jamais renvoyé" }
+
+    UserPatch:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string }
+        email: { type: string }
+        city: { type: string }
+        password: { type: string, format: password, minLength: 8, writeOnly: true }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer, format: int64, readOnly: true }
+        name: { type: string }
+        email: { type: string }
+        city: { type: string }
+        ratingSum: { type: integer, readOnly: true }
+        ratingCount: { type: integer, readOnly: true }
+        averageRating: { type: number, format: double, readOnly: true, description: "Note moyenne (0 si aucune note)" }
+
+    RideInput:
+      type: object
+      required: [driverId, origin, destination, departureAt, seats, price]
+      properties:
+        driverId: { type: integer, format: int64, description: "Identifiant du conducteur (doit exister)" }
+        origin: { type: string, description: "Ville de départ", example: sfax }
+        destination: { type: string, description: "Ville d'arrivée (différente du départ)", example: tunis }
+        departureAt: { type: integer, format: int64, description: "Départ, timestamp Unix en secondes (dans le futur)" }
+        seats: { type: integer, minimum: 1, maximum: 8, description: "Places proposées" }
+        price: { type: integer, minimum: 0, description: "Prix par place, en dinars" }
+        originLat: { type: number, format: double, description: "Latitude de départ (optionnelle si la ville est connue)" }
+        originLon: { type: number, format: double, description: "Longitude de départ (optionnelle si la ville est connue)" }
+
+    RideReplace:
+      type: object
+      required: [price, seats, departureAt]
+      properties:
+        price: { type: integer, minimum: 0 }
+        seats: { type: integer, minimum: 1, maximum: 8 }
+        departureAt: { type: integer, format: int64, description: "Timestamp Unix en secondes (dans le futur)" }
+
+    RidePatch:
+      type: object
+      minProperties: 1
+      properties:
+        price: { type: integer, minimum: 0 }
+        seats: { type: integer, minimum: 1, maximum: 8 }
+        departureAt: { type: integer, format: int64 }
+        status: { type: string, enum: [OPEN, CLOSED] }
+
+    Ride:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        driverId: { type: integer, format: int64 }
+        origin: { type: string, example: sfax }
+        destination: { type: string, example: tunis }
+        departureAt: { type: integer, format: int64, description: "Timestamp Unix en secondes" }
+        seats: { type: integer, description: "Places proposées" }
+        seatsLeft: { type: integer, description: "Places restantes" }
+        price: { type: integer, description: "Prix par place, en dinars" }
+        status: { type: string, enum: [OPEN, CLOSED] }
+        distanceKm: { type: number, format: double, description: "Distance au point cherché (recherche géographique uniquement)" }
+        passengers:
+          type: array
+          description: Identifiants des passagers (détail d'un trajet uniquement)
+          items: { type: integer, format: int64 }

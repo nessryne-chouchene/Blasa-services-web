@@ -16,6 +16,8 @@ import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
+import javax.ws.rs.container.ContainerRequestContext;
+import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
@@ -42,9 +44,24 @@ public class RideResource {
         return Instant.now().getEpochSecond();
     }
 
+    /** Si l'authentification est active : seul le conducteur du trajet peut le modifier ou l'annuler. */
+    private Response denyUnlessDriver(ContainerRequestContext ctx, long rideId) {
+        if (!Authz.active(ctx)) {
+            return null;
+        }
+        Ride r = rides.find(rideId);
+        return r == null ? null : Authz.denyUnlessUser(ctx, r.getDriverId());   // trajet inconnu : le 404 suivra
+    }
+
     /** POST /rides : proposer un trajet -> 201 / 400 / 404 (conducteur inconnu). */
     @POST
-    public Response create(Ride b) {
+    public Response create(Ride b, @Context ContainerRequestContext ctx) {
+        if (b != null && b.getDriverId() != null) {
+            Response denied = Authz.denyUnlessUser(ctx, b.getDriverId());   // on ne propose un trajet qu'en son nom
+            if (denied != null) {
+                return denied;
+            }
+        }
         if (b == null || b.getDriverId() == null || blank(b.getOrigin()) || blank(b.getDestination())
                 || b.getDepartureAt() == null || b.getSeats() == null || b.getPrice() == null) {
             return UserResource.error(Response.Status.BAD_REQUEST,
@@ -89,11 +106,13 @@ public class RideResource {
      *   ?lat=..&lon=..&radius=50   autour d'un point (GEO)
      *   ?from=sfax&to=tunis        par villes (index SET)
      *   (sans parametre)           tous les trajets
+     * Pagination optionnelle (se combine avec tous les modes) : &page=1&size=20
      */
     @GET
     public Response search(@QueryParam("lat") Double lat, @QueryParam("lon") Double lon,
             @QueryParam("radius") @DefaultValue("50") double radius,
-            @QueryParam("from") String from, @QueryParam("to") String to) {
+            @QueryParam("from") String from, @QueryParam("to") String to,
+            @QueryParam("page") Integer page, @QueryParam("size") Integer size) {
         if ((lat == null) != (lon == null)) {
             return UserResource.error(Response.Status.BAD_REQUEST, "lat et lon vont ensemble");
         }
@@ -102,7 +121,7 @@ public class RideResource {
         }
         List<Ride> found = rides.search(lat, lon, radius,
                 blank(from) ? null : Cities.slug(from), blank(to) ? null : Cities.slug(to));
-        return Response.ok(found).build();
+        return PagedResponse.of(found, page, size);       // sans page/size : liste complete, comme avant
     }
 
     /** GET /rides/{id} : detail (avec la liste des passagers) -> 200 / 404. */
@@ -119,7 +138,11 @@ public class RideResource {
     /** PUT /rides/{id} : remplacer price + seats + departureAt (les trois sont obligatoires). */
     @PUT
     @Path("/{id}")
-    public Response replace(@PathParam("id") long id, Ride b) {
+    public Response replace(@PathParam("id") long id, Ride b, @Context ContainerRequestContext ctx) {
+        Response denied = denyUnlessDriver(ctx, id);
+        if (denied != null) {
+            return denied;
+        }
         if (b == null || b.getPrice() == null || b.getSeats() == null || b.getDepartureAt() == null) {
             return UserResource.error(Response.Status.BAD_REQUEST, "PUT exige price, seats et departureAt");
         }
@@ -133,7 +156,11 @@ public class RideResource {
     /** PATCH /rides/{id} : modifier seulement certains champs (price, seats, departureAt, status). */
     @PATCH
     @Path("/{id}")
-    public Response patch(@PathParam("id") long id, Map<String, String> changes) {
+    public Response patch(@PathParam("id") long id, Map<String, String> changes, @Context ContainerRequestContext ctx) {
+        Response denied = denyUnlessDriver(ctx, id);
+        if (denied != null) {
+            return denied;
+        }
         if (changes == null || changes.isEmpty()) {
             return UserResource.error(Response.Status.BAD_REQUEST, "aucun champ a modifier");
         }
@@ -187,7 +214,11 @@ public class RideResource {
     /** DELETE /rides/{id} : annuler le trajet -> 204 / 404. */
     @DELETE
     @Path("/{id}")
-    public Response delete(@PathParam("id") long id) {
+    public Response delete(@PathParam("id") long id, @Context ContainerRequestContext ctx) {
+        Response denied = denyUnlessDriver(ctx, id);
+        if (denied != null) {
+            return denied;
+        }
         if (!rides.delete(id)) {
             return UserResource.error(Response.Status.NOT_FOUND, "trajet " + id + " introuvable");
         }
