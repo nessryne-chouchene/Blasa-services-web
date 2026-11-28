@@ -93,6 +93,21 @@ class UserRepositoryTest {
     }
 
     @Test
+    void roleStockeEtRelu() {
+        User u = user("Karim", "karim@mail.tn", "Sfax");
+        u.setRole("DRIVER");
+        long id = repo.create(u).getId();
+        assertEquals("DRIVER", repo.find(id).getRole());
+        assertEquals("DRIVER", repo.findAll().get(0).getRole());
+    }
+
+    @Test
+    void compteSansRoleGardeUnRoleNull() {
+        long id = repo.create(user("Ancien", "ancien@mail.tn", "Sfax")).getId();
+        assertNull(repo.find(id).getRole());              // anciens comptes : aucune restriction
+    }
+
+    @Test
     void compteSansMotDePasse() {
         long id = repo.create(user("Sarra", "sarra@mail.tn", "Sfax")).getId();
         assertNull(repo.passwordHash(id));

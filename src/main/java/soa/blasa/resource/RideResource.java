@@ -22,6 +22,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 import soa.blasa.model.Ride;
+import soa.blasa.model.Role;
 import soa.blasa.repository.Cities;
 import soa.blasa.repository.Conflict;
 import soa.blasa.repository.RideRepository;
@@ -61,6 +62,10 @@ public class RideResource {
             if (denied != null) {
                 return denied;
             }
+        }
+        Response notDriver = Authz.requireRole(ctx, users, Role.DRIVER, "seuls les conducteurs peuvent proposer un trajet");
+        if (notDriver != null) {
+            return notDriver;
         }
         if (b == null || b.getDriverId() == null || blank(b.getOrigin()) || blank(b.getDestination())
                 || b.getDepartureAt() == null || b.getSeats() == null || b.getPrice() == null) {

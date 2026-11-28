@@ -1,6 +1,7 @@
 package soa.blasa.resource;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import javax.ws.rs.Consumes;
@@ -35,22 +36,27 @@ public class AuthResource {
         if (!(email instanceof String e) || e.isBlank() || !(password instanceof String pw) || pw.isEmpty()) {
             return UserResource.error(Response.Status.BAD_REQUEST, "email et password sont obligatoires");
         }
-        Long userId = null;
+        User found = null;
         for (User u : users.findAll()) {
             if (u.getEmail() != null && u.getEmail().equalsIgnoreCase(e.trim())) {
                 String hash = users.passwordHash(u.getId());
                 if (hash != null && PasswordHasher.verify(pw, hash)) {
-                    userId = u.getId();
+                    found = u;
                     break;
                 }
             }
         }
-        if (userId == null) {
+        if (found == null) {
             PasswordHasher.verify(pw, DUMMY_HASH);
             return UserResource.error(Response.Status.UNAUTHORIZED, "email ou mot de passe incorrect");
         }
-        String token = AuthConfig.jwt().issue(userId, Instant.now().getEpochSecond());
-        return Response.ok(Map.of("token", token, "tokenType", "Bearer",
-                "expiresIn", AuthConfig.jwt().ttlSeconds(), "userId", userId)).build();
+        String token = AuthConfig.jwt().issue(found.getId(), Instant.now().getEpochSecond());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("token", token);
+        out.put("tokenType", "Bearer");
+        out.put("expiresIn", AuthConfig.jwt().ttlSeconds());
+        out.put("userId", found.getId());
+        out.put("role", found.getRole());          // peut etre null pour un ancien compte
+        return Response.ok(out).build();
     }
 }

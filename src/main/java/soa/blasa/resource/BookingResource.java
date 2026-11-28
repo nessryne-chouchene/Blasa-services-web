@@ -15,6 +15,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 import soa.blasa.model.Ride;
+import soa.blasa.model.Role;
 import soa.blasa.repository.Conflict;
 import soa.blasa.repository.RideRepository;
 import soa.blasa.repository.UserRepository;
@@ -39,6 +40,10 @@ public class BookingResource {
         Response denied = Authz.denyUnlessUser(ctx, userId);      // on ne reserve qu'en son nom (si auth active)
         if (denied != null) {
             return denied;
+        }
+        Response notPassenger = Authz.requireRole(ctx, users, Role.PASSENGER, "seuls les passagers peuvent reserver une place");
+        if (notPassenger != null) {
+            return notPassenger;
         }
 
         Ride ride = rides.find(rideId);

@@ -58,6 +58,17 @@
   .btn { border: 0; border-radius: 10px; padding: 11px 18px; font-weight: 700; background: var(--brand); color: #fff; }
   .btn:hover { background: var(--brand-dark); }
   .btn.ghost { background: transparent; color: var(--brand); border: 1px solid var(--line); }
+  .roles { border: 0; padding: 0; margin: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  .roles legend { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; padding: 0; }
+  .role { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 12px; padding: 12px; cursor: pointer; }
+  .role:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+  .role input { margin-top: 4px; }
+  .role small { display: block; color: var(--muted); }
+  .pager { display: flex; gap: 12px; align-items: center; justify-content: center; margin: 18px 0 0; flex-wrap: wrap; }
+  .pager .hint { margin: 0; }
+  a.tech-btn { text-decoration: none; display: inline-block; }
+  details.login { margin: 14px 0 0; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+  details.login summary { cursor: pointer; font-weight: 600; color: var(--brand); }
   .btn.ghost:hover { border-color: var(--brand); background: var(--brand-soft); }
   .btn.danger { background: transparent; color: var(--err); border: 1px solid var(--line); }
   .btn.danger:hover { border-color: var(--err); }
@@ -188,6 +199,7 @@
     </nav>
     <span class="live" id="live" title="Connexion en direct (Redis Pub/Sub puis SSE)"><i></i><span>Hors ligne</span></span>
     <button class="me-chip" id="me-chip" hidden></button>
+    <a class="tech-btn" href="docs.html" target="_blank" rel="noopener" title="Documentation OpenAPI / Swagger de l'API">📖 API</a>
     <button class="tech-btn" id="tech-btn" title="Voir les requêtes HTTP et Redis">&lt;/&gt; Mode technique</button>
   </div>
 </header>
@@ -245,6 +257,7 @@ const store = {
 let me = null, users = [], currentView = "search", mineTab = "booked", drawerOpen = false;
 const rated = new Set();
 let lastOwn = 0, lastSearch = null;
+const PAGE_SIZE = 6;                     // trajets affichés par page (pagination de l'API : ?page=&size=)
 
 const userById = (id) => users.find((u) => u.id === id);
 const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
@@ -266,13 +279,18 @@ async function api(method, path, body, opt) {
   opt = opt || {};
   const o = { method, headers: {} };
   if (body !== undefined) { o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(body); }
-  const t0 = performance.now(); let status = 0, text = "";
-  try { const r = await fetch(API + path, o); status = r.status; text = await r.text(); } catch (e) { text = "Erreur réseau : " + e.message; }
+  const token = opt.token !== undefined ? opt.token : store.get("blasa.token");   // jeton JWT de la session (ou celui imposé par le scénario de démo)
+  if (token) o.headers["Authorization"] = "Bearer " + token;
+  const t0 = performance.now(); let status = 0, text = "", hdrs = null;
+  try { const r = await fetch(API + path, o); status = r.status; hdrs = r.headers; text = await r.text(); } catch (e) { text = "Erreur réseau : " + e.message; }
+  if (status === 401 && !path.startsWith("/auth/") && opt.token === undefined && store.get("blasa.token")) {   // jeton expiré ou refusé
+    if (me) logout("Session expirée : reconnecte-toi."); else store.del("blasa.token");
+  }
   let data = null; try { data = text ? JSON.parse(text) : null; } catch (e) { /* texte brut */ }
   if (!opt.quiet) logCall(method, API + path, body, status, Math.round(performance.now() - t0), data, text, opt.note);
   if (method !== "GET" && !opt.quiet) lastOwn = Date.now();   // pour ne pas afficher une notification de sa propre action
   if (method !== "GET" && drawerOpen) refreshRedis();
-  return { status, ok: status >= 200 && status < 300, data };
+  return { status, ok: status >= 200 && status < 300, data, headers: hdrs };
 }
 
 function logCall(method, url, body, status, ms, data, text, note) {
@@ -288,7 +306,12 @@ function logCall(method, url, body, status, ms, data, text, note) {
 
 let previous = {};
 async function refreshRedis() {
-  let rows = []; try { rows = await (await fetch(API + "/debug/redis")).json(); } catch (e) { return; }
+  let rows = [];
+  try {
+    const t = store.get("blasa.token");
+    rows = await (await fetch(API + "/debug/redis", t ? { headers: { Authorization: "Bearer " + t } } : undefined)).json();
+  } catch (e) { return; }
+  if (!Array.isArray(rows)) return;                      // pas connecté : rien à afficher
   const tb = $("keys").querySelector("tbody"); tb.innerHTML = ""; const now = {};
   rows.forEach((r) => {
     const v = JSON.stringify(r.value); now[r.key] = v;
@@ -309,33 +332,84 @@ $("d-close").onclick = () => { drawerOpen = false; $("drawer").classList.remove(
 /* ================= utilisateur courant ================= */
 async function loadUsers() { const r = await api("GET", "/users", undefined, { quiet: true }); users = r.ok ? r.data : []; return users; }
 
+/** Les données d'une réponse en tableau (une erreur 401/403 renvoie un objet {error} : on traite ça comme une liste vide). */
+const asList = (r) => (r && Array.isArray(r.data) ? r.data : []);
+const roleLabel = (r) => r === "DRIVER" ? "🚗 Conducteur" : r === "PASSENGER" ? "🧍 Passager" : "";
+
 function setMe(u) {
   me = u; store.set("blasa.me", String(u.id));
   $("me-chip").hidden = false;
-  $("me-chip").innerHTML = avatar(u) + "<span>" + esc(u.name) + "</span>";
+  $("me-chip").innerHTML = avatar(u) + "<span>" + esc(u.name) + "</span>" + (u.role ? '<span title="' + roleLabel(u.role) + '">' + (u.role === "DRIVER" ? "🚗" : "🧍") + "</span>" : "");
+  // un passager ne propose pas de trajets
+  document.querySelectorAll("#nav button").forEach((b) => { b.hidden = u.role === "PASSENGER" && b.dataset.v === "offer"; });
   $("welcome").hidden = true;
-  go("search");
+  if (u.role === "DRIVER") { mineTab = "offered"; go("mine"); } else go("search");
 }
 
-function showWelcome() {
+/** Déconnexion : on oublie le jeton et le profil, retour à l'écran de connexion. */
+function logout(msg) {
+  store.del("blasa.token"); store.del("blasa.me");
+  me = null; users = [];
+  if (map) { map.remove(); map = null; mapCircle = null; }
+  $("me-chip").hidden = true;
+  showWelcome("login");
+  if (msg) toast(msg, true);
+}
+
+/** Connexion réussie (réponse de /auth/login) : on garde le jeton, on charge les données, on entre dans l'application. */
+async function startSession(login) {
+  store.set("blasa.token", login.token);
+  await loadUsers();
+  const u = userById(login.userId);
+  if (!u) { store.del("blasa.token"); return toast("Compte introuvable", true); }
+  setMe(u); toast("Bienvenue " + u.name + " !");
+}
+
+function showWelcome(tab) {
+  tab = tab || "login";
   const w = $("welcome"); w.hidden = false;
+  const form = tab === "login"
+    ? '<form id="login" class="form" style="max-width:none">' +
+      '<label class="f">Email<input id="lg-email" type="email" required autocomplete="username"></label>' +
+      '<label class="f">Mot de passe<input id="lg-pass" type="password" required autocomplete="current-password"></label>' +
+      '<button class="btn">Me connecter</button></form>'
+    : '<form id="signup" class="form" style="max-width:none">' +
+      '<fieldset class="roles"><legend>Je suis…</legend>' +
+      '<label class="role"><input type="radio" name="su-role" value="PASSENGER" required><span><b>🧍 Passager</b><small>Je cherche un covoiturage</small></span></label>' +
+      '<label class="role"><input type="radio" name="su-role" value="DRIVER" required><span><b>🚗 Conducteur</b><small>J\'ai une voiture et je cherche des passagers</small></span></label></fieldset>' +
+      '<label class="f">Prénom<input id="su-name" required maxlength="40"></label>' +
+      '<label class="f">Email<input id="su-email" type="email" required autocomplete="username"></label>' +
+      '<label class="f">Ta ville<select id="su-city">' + cityOptions("Sfax") + "</select></label>" +
+      '<label class="f">Mot de passe <small>(8 caractères minimum)</small><input id="su-pass" type="password" minlength="8" required autocomplete="new-password"></label>' +
+      '<button class="btn">Créer mon compte</button></form>';
   w.innerHTML = '<div class="modal"><h2>Bienvenue sur Blasa 👋</h2>' +
-    '<p class="sub">Le covoiturage entre étudiants, partout en Tunisie. Choisis ton profil pour essayer l\'application.</p>' +
-    '<div class="who-list">' + users.map((u) => '<button class="who-btn" data-act="pick" data-id="' + u.id + '">' + avatar(u) +
-      "<span><b>" + esc(u.name) + "</b><small>" + esc(cityLabel(u.city)) + " · " + (u.ratingCount ? u.averageRating.toFixed(1) + " ★" : "nouveau") + "</small></span></button>").join("") + "</div>" +
-    '<h3 style="margin:18px 0 8px">Ou crée ton compte</h3>' +
-    '<form id="signup" class="form" style="max-width:none">' +
-    '<label class="f">Prénom<input id="su-name" required maxlength="40"></label>' +
-    '<label class="f">Email<input id="su-email" type="email" required></label>' +
-    '<label class="f">Ta ville<select id="su-city">' + cityOptions("Sfax") + "</select></label>" +
-    '<button class="btn">Créer mon compte</button></form></div>';
-  $("signup").onsubmit = async (e) => {
-    e.preventDefault();
-    const r = await api("POST", "/users", { name: $("su-name").value.trim(), email: $("su-email").value.trim(), city: $("su-city").value },
-      { note: "<code>INCR seq:user</code>, <code>HSET user:{id}</code>" });
-    if (!r.ok) return toast((r.data && r.data.error) || "Création impossible", true);
-    await loadUsers(); setMe(r.data); toast("Compte créé. Bienvenue " + r.data.name + " !");
-  };
+    '<p class="sub">Le covoiturage entre étudiants, partout en Tunisie. Connecte-toi pour continuer.</p>' +
+    '<div class="tabs" id="wtabs" style="margin-top:6px"><button data-t="login" class="' + (tab === "login" ? "on" : "") + '">Me connecter</button>' +
+    '<button data-t="signup" class="' + (tab === "signup" ? "on" : "") + '">Créer un compte</button></div>' +
+    '<div style="margin-top:14px">' + form + "</div></div>";
+  $("wtabs").onclick = (e) => { const b = e.target.closest("button"); if (b) showWelcome(b.dataset.t); };
+  if (tab === "login") {
+    $("login").onsubmit = async (e) => {
+      e.preventDefault();
+      store.del("blasa.token");
+      const l = await api("POST", "/auth/login", { email: $("lg-email").value.trim(), password: $("lg-pass").value },
+        { note: "vérification du mot de passe (hash PBKDF2), création du jeton JWT" });
+      if (!l.ok) return toast((l.data && l.data.error) || "Connexion impossible", true);
+      await startSession(l.data);
+    };
+  } else {
+    $("signup").onsubmit = async (e) => {
+      e.preventDefault();
+      store.del("blasa.token");
+      const body = { name: $("su-name").value.trim(), email: $("su-email").value.trim(), city: $("su-city").value,
+        password: $("su-pass").value, role: document.querySelector('input[name="su-role"]:checked').value };
+      const r = await api("POST", "/users", body, { note: "<code>INCR seq:user</code>, <code>HSET user:{id}</code> (mot de passe haché PBKDF2, rôle " + body.role + ")" });
+      if (!r.ok) return toast((r.data && r.data.error) || "Création impossible", true);
+      const l = await api("POST", "/auth/login", { email: body.email, password: body.password }, { note: "création du jeton JWT" });
+      if (!l.ok) { toast("Compte créé. Connecte-toi avec ton email et ton mot de passe."); return showWelcome("login"); }
+      await startSession(l.data);
+    };
+  }
 }
 
 /* ================= navigation ================= */
@@ -366,6 +440,7 @@ function rideCard(r) {
   const full = r.seatsLeft <= 0, closed = r.status !== "OPEN";
   let action;
   if (mine) action = '<button class="btn" disabled>Ton trajet</button>';
+  else if (me && me.role === "DRIVER") action = '<button class="btn" disabled title="Un conducteur ne réserve pas de place">Réservé aux passagers</button>';
   else if (booked) action = '<button class="btn" disabled>Réservé ✓</button><button class="btn ghost" data-act="unbook" data-ride="' + r.id + '">Annuler</button>';
   else if (closed) action = '<button class="btn" disabled>Fermé</button>';
   else if (full) action = '<button class="btn" disabled>Complet</button>';
@@ -389,7 +464,7 @@ function viewSearch() {
     '<label class="f">Arrivée<select id="s-to">' + cityOptions("", true) + "</select></label>" +
     '<button class="btn" type="submit">Chercher</button>' +
     '<button class="btn ghost" type="button" id="s-near">📍 Près de moi</button></div></form>' +
-    '<h2 class="title" id="s-title">Prochains trajets</h2><div class="list" id="results"></div>';
+    '<h2 class="title" id="s-title">Prochains trajets</h2><div class="list" id="results"></div><div class="pager" id="pager"></div>';
   $("sform").onsubmit = (e) => { e.preventDefault(); doSearch(false); };
   $("s-near").onclick = () => doSearch(true);
   doSearch(false);
@@ -412,18 +487,28 @@ async function doSearch(near) {
     note = from && to ? "<code>SINTER rides:from:… rides:to:…</code>" : from || to ? "<code>SMEMBERS rides:from|to:…</code>" : "<code>ZRANGE rides:geo 0 -1</code>";
     title = from || to ? "Résultats" : "Prochains trajets";
   }
-  lastSearch = { url: "/rides" + (q.toString() ? "?" + q : ""), note, title };
+  lastSearch = { url: "/rides" + (q.toString() ? "?" + q : ""), note, title, page: 1 };
   return runSearch(lastSearch);
 }
 
 async function runSearch(s) {
-  const r = await api("GET", s.url, undefined, { note: s.note });
+  const url = s.url + (s.url.includes("?") ? "&" : "?") + "page=" + (s.page || 1) + "&size=" + PAGE_SIZE;
+  const r = await api("GET", url, undefined, { note: s.note + " · pagination : <code>?page=" + (s.page || 1) + "&amp;size=" + PAGE_SIZE + "</code>" });
   if (!r.ok) return toast("Recherche impossible", true);
+  const total = Number(r.headers && r.headers.get("X-Total-Count")) || 0;
+  const pages = Number(r.headers && r.headers.get("X-Total-Pages")) || 1;
+  if (!r.data.length && (s.page || 1) > 1 && pages >= 1) { s.page = pages; return runSearch(s); }   // la dernière page a disparu
   const rides = await enrich(r.data);
   if (!$("s-title")) return;                       // on a change de page pendant le chargement
-  $("s-title").textContent = s.title + " (" + rides.length + ")";
+  $("s-title").textContent = s.title + " (" + (total || rides.length) + ")";
   $("results").innerHTML = rides.length ? rides.map(rideCard).join("")
     : '<div class="empty"><b>Aucun trajet trouvé</b>Essaie d\'autres villes, ou propose toi-même ce trajet !</div>';
+  const page = s.page || 1;
+  $("pager").innerHTML = pages > 1
+    ? '<button class="btn ghost" data-act="page" data-dir="-1"' + (page <= 1 ? " disabled" : "") + '>← Précédent</button>' +
+      '<span class="hint">Page ' + page + " / " + pages + '</span>' +
+      '<button class="btn ghost" data-act="page" data-dir="1"' + (page >= pages ? " disabled" : "") + '>Suivant →</button>'
+    : "";
   setTimeout(tick, 0);
 }
 
@@ -454,9 +539,10 @@ function viewOffer() {
 
 /* ================= vue : mes trajets ================= */
 async function viewMine() {
+  if (me.role === "DRIVER") mineTab = "offered"; else if (me.role === "PASSENGER") mineTab = "booked";   // un seul onglet selon le rôle
   $("view").innerHTML = '<h2 class="title">Mes trajets</h2><div class="tabs" id="mtabs">' +
-    '<button data-t="booked" class="' + (mineTab === "booked" ? "on" : "") + '">Mes réservations</button>' +
-    '<button data-t="offered" class="' + (mineTab === "offered" ? "on" : "") + '">Mes trajets proposés</button></div><div class="list" id="mlist" style="margin-top:12px"><p class="hint">Chargement…</p></div>';
+    (me.role === "DRIVER" ? "" : '<button data-t="booked" class="' + (mineTab === "booked" ? "on" : "") + '">Mes réservations</button>') +
+    (me.role === "PASSENGER" ? "" : '<button data-t="offered" class="' + (mineTab === "offered" ? "on" : "") + '">Mes trajets proposés</button>') + '</div><div class="list" id="mlist" style="margin-top:12px"><p class="hint">Chargement…</p></div>';
   $("mtabs").onclick = (e) => { const b = e.target.closest("button"); if (b) { mineTab = b.dataset.t; viewMine(); } };
   const r = await api("GET", "/rides", undefined, { note: "<code>ZRANGE rides:geo 0 -1</code>, <code>HGETALL ride:…</code>" });
   const all = await enrich(r.ok ? r.data : []);
@@ -497,7 +583,7 @@ async function viewTop() {
   const d = s.data || {};
   $("tiles").innerHTML = [["ridesCreated", "trajets proposés"], ["bookings", "places réservées"], ["ratings", "notes données"]]
     .map((x) => '<div class="tile"><b>' + (d[x[0]] || 0) + "</b><span>" + x[1] + "</span></div>").join("");
-  $("ranks").innerHTML = (t.data || []).map((r, i) => '<div class="rank"><span class="n">' + (i + 1) + "</span>" + avatar(userById(r.userId) || { name: r.name }) +
+  $("ranks").innerHTML = asList(t).map((r, i) => '<div class="rank"><span class="n">' + (i + 1) + "</span>" + avatar(userById(r.userId) || { name: r.name }) +
     '<span class="who">' + esc(r.name) + "</span>" + stars(r.averageRating, r.ratingCount) + "</div>").join("") ||
     '<div class="empty"><b>Pas encore de notes</b>Réserve un trajet puis note ton conducteur.</div>';
 }
@@ -505,13 +591,16 @@ async function viewTop() {
 /* ================= vue : mon profil ================= */
 function viewProfile() {
   $("view").innerHTML = '<h2 class="title">Mon profil</h2><div class="panel form">' +
-    '<div class="profile-head">' + avatar(me, true) + "<div><h2>" + esc(me.name) + "</h2>" + stars(me.averageRating, me.ratingCount) + "</div></div>" +
+    '<div class="profile-head">' + avatar(me, true) + "<div><h2>" + esc(me.name) + "</h2>" + (me.role ? '<span class="badge">' + roleLabel(me.role) + "</span> " : "") + stars(me.averageRating, me.ratingCount) + "</div></div>" +
     '<form id="pform" class="form" style="max-width:none">' +
     '<label class="f">Prénom<input id="p-name" value="' + esc(me.name) + '" required></label>' +
     '<label class="f">Email<input id="p-email" type="email" value="' + esc(me.email) + '" required></label>' +
     '<label class="f">Ville<select id="p-city">' + cityOptions(me.city) + "</select></label>" +
     '<button class="btn">Enregistrer</button></form>' +
-    '<div class="actions"><button class="btn ghost" data-act="switch">Changer de profil</button>' +
+    '<form id="pwform" class="form" style="max-width:none">' +
+    '<label class="f">Mot de passe <small>(8 caractères minimum ; sert à te connecter)</small><input id="p-pass" type="password" minlength="8" required autocomplete="new-password"></label>' +
+    '<button class="btn ghost">Définir / changer le mot de passe</button></form>' +
+    '<div class="actions"><button class="btn ghost" data-act="logout">Me déconnecter</button>' +
     '<button class="btn danger" data-act="delme">Supprimer mon compte</button></div></div>';
   $("pform").onsubmit = async (e) => {
     e.preventDefault();
@@ -520,12 +609,19 @@ function viewProfile() {
     if (!r.ok) return toast((r.data && r.data.error) || "Enregistrement impossible", true);
     await loadUsers(); setMe(userById(me.id)); go("profile"); toast("Profil mis à jour.");
   };
+  $("pwform").onsubmit = async (e) => {
+    e.preventDefault();
+    const r = await api("PATCH", "/users/" + me.id, { password: $("p-pass").value }, { note: "<code>HSET user:" + me.id + " pwHash</code> (hash PBKDF2, jamais le mot de passe)" });
+    if (!r.ok) return toast((r.data && r.data.error) || "Mot de passe non modifié", true);
+    $("p-pass").value = ""; toast("Mot de passe enregistré. Tu pourras te connecter avec ton email.");
+  };
 }
 
 /* ================= actions (boutons) ================= */
 const actions = {
-  pick(d) { setMe(userById(Number(d.id))); },
+  page(d) { if (lastSearch) { lastSearch.page = Math.max(1, (lastSearch.page || 1) + Number(d.dir)); runSearch(lastSearch); window.scrollTo(0, 0); } },
   async book(d) {
+    if (me && me.role === "DRIVER") return toast("Seuls les passagers peuvent réserver une place.", true);
     const r = await api("POST", "/rides/" + d.ride + "/bookings", { userId: me.id }, { note: "<code>HINCRBY ride:" + d.ride + " seatsLeft -1</code> (atomique), <code>SADD …:passengers</code>" });
     toast(r.ok ? "Place réservée ! Bon voyage 🎉" : ((r.data && r.data.error) || "Réservation impossible"), !r.ok); refresh();
   },
@@ -552,12 +648,12 @@ const actions = {
     const r = await api("DELETE", "/rides/" + d.ride, undefined, { note: "<code>SREM</code> index, <code>ZREM rides:geo</code>, <code>DEL ride:" + d.ride + "</code>" });
     toast(r.ok ? "Trajet annulé." : "Annulation impossible", !r.ok); refresh();
   },
-  async switch() { await loadUsers(); showWelcome(); },
+  logout() { logout(); },
   async delme() {
     if (!confirm("Supprimer définitivement ton compte ?")) return;
     const r = await api("DELETE", "/users/" + me.id, undefined, { note: "<code>ZREM leaderboard:drivers</code>, <code>DEL user:" + me.id + "</code>" });
     if (!r.ok) return toast("Suppression impossible", true);
-    store.del("blasa.me"); me = null; $("me-chip").hidden = true; await loadUsers(); showWelcome(); toast("Compte supprimé.");
+    logout(); toast("Compte supprimé.");
   }
 };
 document.addEventListener("click", (e) => { const b = e.target.closest("[data-act]"); if (b && actions[b.dataset.act]) actions[b.dataset.act](b.dataset); });
@@ -565,28 +661,40 @@ document.addEventListener("click", (e) => { const b = e.target.closest("[data-ac
 /* ================= scenario de demo (mode technique) ================= */
 $("demo").onclick = async function () {
   const btn = this; btn.disabled = true; $("log").innerHTML = "";
-  const step = async (m, p, b, note) => { const r = await api(m, p, b, { note }); await sleep(1300); return r; };
+  // chaque appel porte le jeton du bon acteur (passagère Lina ou conducteur Karim), indépendamment de la personne connectée
+  const step = async (m, p, b, note, tok) => { const r = await api(m, p, b, { note, token: tok || null }); await sleep(1300); return r; };
   const dep = Math.floor(Date.now() / 1000) + 2 * 86400;
-  const u = await step("POST", "/users", { name: "Lina", email: "lina@mail.tn", city: "Sfax" }, "<code>INCR seq:user</code>, <code>HSET user:{id}</code>");
-  const uid = u.data && u.data.id;
-  await step("GET", "/users/" + uid, undefined, "<code>HGETALL user:" + uid + "</code>");
-  await step("PATCH", "/users/" + uid, { city: "Tunis" }, "<code>HSET user:" + uid + " city</code>");
-  await step("PUT", "/users/" + uid, { name: "Lina B.", email: "lina.b@mail.tn", city: "Sousse" }, "<code>HSET user:" + uid + "</code> (3 champs)");
-  const r = await step("POST", "/rides", { driverId: 2, origin: "Sfax", destination: "Tunis", departureAt: dep, seats: 1, price: 14 },
-    "<code>INCR seq:ride</code>, <code>HSET</code>, <code>EXPIREAT</code>, <code>GEOADD</code>, <code>SADD</code>");
+  const tag = String(Date.now()).slice(-6), pass = "demo-" + tag + "x";
+  const lina = await step("POST", "/users", { name: "Lina", email: "lina" + tag + "@mail.tn", city: "Sfax", password: pass, role: "PASSENGER" },
+    "<code>INCR seq:user</code>, <code>HSET user:{id}</code> (mot de passe haché PBKDF2, rôle PASSENGER)");
+  const pid = lina.data && lina.data.id;
+  const pl = await step("POST", "/auth/login", { email: "lina" + tag + "@mail.tn", password: pass }, "vérification du hash, création du jeton JWT de Lina");
+  const pt = pl.data && pl.data.token;
+  const karim = await step("POST", "/users", { name: "Karim", email: "karim" + tag + "@mail.tn", city: "Sfax", password: pass, role: "DRIVER" },
+    "<code>INCR seq:user</code>, <code>HSET user:{id}</code> (rôle DRIVER)");
+  const did = karim.data && karim.data.id;
+  const dl = await step("POST", "/auth/login", { email: "karim" + tag + "@mail.tn", password: pass }, "création du jeton JWT de Karim (conducteur)");
+  const dt = dl.data && dl.data.token;
+  await step("GET", "/users/" + pid, undefined, "<code>HGETALL user:" + pid + "</code>", pt);
+  await step("PATCH", "/users/" + pid, { city: "Tunis" }, "<code>HSET user:" + pid + " city</code>", pt);
+  await step("PUT", "/users/" + pid, { name: "Lina B.", email: "lina" + tag + "@mail.tn", city: "Sousse" }, "<code>HSET user:" + pid + "</code> (3 champs)", pt);
+  const r = await step("POST", "/rides", { driverId: did, origin: "Sfax", destination: "Tunis", departureAt: dep, seats: 1, price: 14 },
+    "<code>INCR seq:ride</code>, <code>HSET</code>, <code>EXPIREAT</code>, <code>GEOADD</code>, <code>SADD</code> (réservé aux conducteurs)", dt);
   const rid = r.data && r.data.id;
-  await step("GET", "/rides?from=sfax&to=tunis", undefined, "<code>SINTER rides:from:sfax rides:to:tunis</code>");
-  await step("GET", "/rides?lat=34.74&lon=10.76&radius=50", undefined, "<code>GEOSEARCH rides:geo … BYRADIUS 50 KM ASC</code>");
-  await step("POST", "/rides/" + rid + "/bookings", { userId: uid }, "<code>HINCRBY seatsLeft -1</code>, <code>SADD passengers</code>");
-  await step("POST", "/rides/" + rid + "/bookings", { userId: uid }, "<code>SISMEMBER</code> → déjà réservé (409)");
-  await step("PATCH", "/rides/" + rid, { price: 16 }, "<code>HSET ride:" + rid + " price</code>");
-  await step("POST", "/users/2/ratings", { score: 5 }, "<code>HINCRBY</code>, <code>ZADD leaderboard:drivers</code>");
-  await step("GET", "/stats/top-drivers?limit=3", undefined, "<code>ZREVRANGE leaderboard:drivers 0 2 WITHSCORES</code>");
-  await step("DELETE", "/rides/" + rid + "/bookings/" + uid, undefined, "<code>SREM</code>, <code>HINCRBY +1</code>");
-  await step("DELETE", "/rides/" + rid, undefined, "<code>SREM</code>, <code>ZREM</code>, <code>DEL</code>");
-  await step("DELETE", "/users/" + uid, undefined, "<code>DEL user:" + uid + "</code>");
-  await step("GET", "/users/" + uid, undefined, "clé absente → 404");
-  await loadUsers(); btn.disabled = false; if (me) refresh();
+  await step("GET", "/rides?from=sfax&to=tunis", undefined, "<code>SINTER rides:from:sfax rides:to:tunis</code>", pt);
+  await step("GET", "/rides?lat=34.74&lon=10.76&radius=50", undefined, "<code>GEOSEARCH rides:geo … BYRADIUS 50 KM ASC</code>", pt);
+  await step("POST", "/rides/" + rid + "/bookings", { userId: pid }, "<code>HINCRBY seatsLeft -1</code>, <code>SADD passengers</code> (réservé aux passagers)", pt);
+  await step("POST", "/rides/" + rid + "/bookings", { userId: pid }, "<code>SISMEMBER</code> → déjà réservé (409)", pt);
+  await step("PATCH", "/rides/" + rid, { price: 16 }, "<code>HSET ride:" + rid + " price</code> (seul le conducteur du trajet)", dt);
+  await step("POST", "/users/" + did + "/ratings", { score: 5 }, "<code>HINCRBY</code>, <code>ZADD leaderboard:drivers</code>", pt);
+  await step("GET", "/stats/top-drivers?limit=3", undefined, "<code>ZREVRANGE leaderboard:drivers 0 2 WITHSCORES</code>", pt);
+  await step("DELETE", "/rides/" + rid + "/bookings/" + pid, undefined, "<code>SREM</code>, <code>HINCRBY +1</code>", pt);
+  await step("DELETE", "/rides/" + rid, undefined, "<code>SREM</code>, <code>ZREM</code>, <code>DEL</code>", dt);
+  await step("DELETE", "/users/" + pid, undefined, "<code>DEL user:" + pid + "</code>", pt);
+  await step("GET", "/users/" + pid, undefined, "clé absente → 404", dt);
+  await step("DELETE", "/users/" + did, undefined, "<code>ZREM leaderboard:drivers</code>, <code>DEL user:" + did + "</code>", dt);
+  btn.disabled = false;
+  if (me) { await loadUsers(); refresh(); }
 };
 
 /* ================= rafraichir la vue courante sans tout reconstruire ================= */
@@ -672,7 +780,7 @@ async function getPos() {
     return [p.coords.latitude, p.coords.longitude];
   } catch (e) { toast("Position indisponible : on prend Sfax."); return COORDS.sfax.slice(); }
 }
-const canBook = (r) => me && r.driverId !== me.id && r.status === "OPEN" && r.seatsLeft > 0 && !(r.passengers || []).includes(me.id);
+const canBook = (r) => me && me.role !== "DRIVER" && r.driverId !== me.id && r.status === "OPEN" && r.seatsLeft > 0 && !(r.passengers || []).includes(me.id);
 function popupHtml(r, dist) {
   const drv = userById(r.driverId);
   return "<b>" + esc(cityLabel(r.origin)) + " → " + esc(cityLabel(r.destination)) + "</b><br>" + fmtDate(r.departureAt) + '<br>⏳ <span class="cd" data-dep="' + r.departureAt + '"></span><br>' +
@@ -717,11 +825,11 @@ async function mapRefresh(fit) {
     const lat = mapCenter[0].toFixed(4), lon = mapCenter[1].toFixed(4);
     const r = await api("GET", "/rides?" + new URLSearchParams({ lat, lon, radius: String(mapRadius) }), undefined,
       { note: "<code>GEOSEARCH rides:geo FROMLONLAT " + lon + " " + lat + " BYRADIUS " + mapRadius + " KM ASC WITHDIST</code>" });
-    (r.data || []).forEach((x) => inside.set(x.id, x.distanceKm));
+    asList(r).forEach((x) => inside.set(x.id, x.distanceKm));
     if ($("m-cmd")) $("m-cmd").textContent = "GEOSEARCH rides:geo FROMLONLAT " + lon + " " + lat + " BYRADIUS " + mapRadius + " km ASC WITHDIST  →  " + inside.size + " trajet(s)";
   }
   const a = await api("GET", "/rides", undefined, mapCenter ? { quiet: true } : { note: "<code>ZRANGE rides:geo 0 -1</code>" });
-  const rides = await enrich(a.data || []);
+  const rides = await enrich(asList(a));
   if (!map) return;                                   // on a quitte la carte pendant le chargement
   mapLayer.clearLayers();
   if (mapCircle) { map.removeLayer(mapCircle); mapCircle = null; }
@@ -752,10 +860,16 @@ async function mapRefresh(fit) {
 /* ================= demarrage ================= */
 (async function init() {
   connectLive();
-  await loadUsers();
-  const saved = Number(store.get("blasa.me"));
-  const u = saved ? userById(saved) : null;
-  if (u) setMe(u); else showWelcome();
+  if (store.get("blasa.token")) {                        // session précédente : on la reprend si le jeton est encore valable
+    const r = await api("GET", "/users", undefined, { quiet: true });
+    if (r.ok) {
+      users = r.data;
+      const u = userById(Number(store.get("blasa.me")));
+      if (u) return setMe(u);
+    }
+    store.del("blasa.token");
+  }
+  showWelcome("login");
 })();
 </script>
 </body>
