@@ -8,11 +8,15 @@ import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
+import javax.ws.rs.container.ContainerRequestContext;
+import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
+import soa.blasa.model.Role;
 import soa.blasa.model.User;
 import soa.blasa.repository.StatsRepository;
+import soa.blasa.repository.UserRepository;
 
 /** Sous-ressource /api/users/{id}/ratings : noter un conducteur (1 a 5). */
 @Path("/users/{id}/ratings")
@@ -24,7 +28,14 @@ public class RatingResource {
 
     /** POST : corps {"score": 5} -> 201 / 400 / 404. */
     @POST
-    public Response rate(@PathParam("id") long id, Map<String, Object> body) {
+    public Response rate(@PathParam("id") long id, Map<String, Object> body, @Context ContainerRequestContext ctx) {
+        Response notPassenger = Authz.requireRole(ctx, new UserRepository(), Role.PASSENGER, "seuls les passagers peuvent noter un conducteur");
+        if (notPassenger != null) {
+            return notPassenger;
+        }
+        if (Authz.isCurrentUser(ctx, id)) {
+            return UserResource.error(Response.Status.FORBIDDEN, "tu ne peux pas te noter toi-meme");
+        }
         Object s = body == null ? null : body.get("score");
         if (!(s instanceof Integer) || (Integer) s < 1 || (Integer) s > 5) {
             return UserResource.error(Response.Status.BAD_REQUEST, "score doit etre un entier entre 1 et 5");

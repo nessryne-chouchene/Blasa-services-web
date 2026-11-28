@@ -29,6 +29,9 @@ public class UserRepository {
             fields.put("city", u.getCity().toLowerCase());
             fields.put("ratingSum", "0");
             fields.put("ratingCount", "0");
+            if (u.getRole() != null) {
+                fields.put("role", u.getRole());
+            }
             if (u.getPassword() != null && !u.getPassword().isBlank()) {
                 fields.put("pwHash", PasswordHasher.hash(u.getPassword()));
             }
@@ -67,6 +70,7 @@ public class UserRepository {
             u.setName(h.get("name"));
             u.setEmail(h.get("email"));
             u.setCity(h.get("city"));
+            u.setRole(h.get("role"));
             u.setRatingSum(Integer.parseInt(h.getOrDefault("ratingSum", "0")));
             u.setRatingCount(Integer.parseInt(h.getOrDefault("ratingCount", "0")));
             return u;

@@ -13,6 +13,7 @@ public class User {
     private String city;
     private int ratingSum;
     private int ratingCount;
+    private String role;          // PASSENGER ou DRIVER (voir Role), choisi a l'inscription
 
     // Uniquement a l'entree (jamais renvoye) : stocke sous forme de hash PBKDF2 dans Redis
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
@@ -29,6 +30,9 @@ public class User {
 
     public String getCity() { return city; }
     public void setCity(String city) { this.city = city; }
+
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
 
     public String getPassword() { return password; }
     public void setPassword(String password) { this.password = password; }

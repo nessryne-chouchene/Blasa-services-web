@@ -1,7 +1,9 @@
 # Lance tout Blasa : Redis (Docker) + donnees de demo + API et page web.
 # Usage (dans le dossier blasa) :   .\start.ps1            demarre
 #                                   .\start.ps1 -Reset     remet les donnees de demo a zero puis demarre
-param([switch]$Reset)
+#                                   .\start.ps1 -Open      API ouverte, sans connexion (pour la collection Postman)
+# Par defaut la connexion est OBLIGATOIRE (AUTH_ENABLED=true) : comptes de demo dans le README, mot de passe blasa2026.
+param([switch]$Reset, [switch]$Open)
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
@@ -21,6 +23,10 @@ if (-not (Get-Command mvn -ErrorAction SilentlyContinue)) {
     if (-not $mvn) { throw "Maven introuvable (attendu dans $env:USERPROFILE\tools\apache-maven-*)." }
     $env:Path = "$($mvn.FullName)\bin;$env:Path"
 }
+
+# --- Connexion obligatoire (JWT), sauf avec -Open
+if ($Open) { Remove-Item Env:AUTH_ENABLED -ErrorAction SilentlyContinue }
+elseif (-not $env:AUTH_ENABLED) { $env:AUTH_ENABLED = "true" }
 
 # --- Redis dans Docker
 Write-Host "1/3 Redis (Docker)..." -ForegroundColor Cyan
@@ -46,7 +52,8 @@ function New-Seed {
 # On recharge si : base vide, option -Reset, ou si le trajet 1 a deja expire (depart passe)
 $size = [int](docker exec blasa-redis redis-cli dbsize)
 $ride1 = [int](docker exec blasa-redis redis-cli exists ride:1)
-if ($Reset -or $size -eq 0 -or $ride1 -eq 0) {
+$demoPw = [int](docker exec blasa-redis redis-cli hexists user:1 pwHash)     # anciennes donnees de demo : sans mot de passe ni role
+if ($Reset -or $size -eq 0 -or $ride1 -eq 0 -or $demoPw -eq 0) {
     Write-Host "2/3 Chargement des donnees de demo (dates fraiches)..." -ForegroundColor Cyan
     New-Seed
     cmd /c "docker exec -i blasa-redis redis-cli < redis\01_seed.redis" | Out-Null
@@ -55,7 +62,10 @@ if ($Reset -or $size -eq 0 -or $ride1 -eq 0) {
 }
 
 # --- API + page web
-Write-Host "3/3 API Blasa sur http://localhost:8080  (Ctrl+C pour arreter)" -ForegroundColor Cyan
-# ouvre le navigateur quand le serveur est pret
-Start-Job { for ($i = 0; $i -lt 60; $i++) { try { Invoke-WebRequest "http://localhost:8080/" -UseBasicParsing | Out-Null; Start-Process "http://localhost:8080/"; break } catch { Start-Sleep 1 } } } | Out-Null
+$https = $env:HTTPS_ENABLED -eq "true"
+$url = if ($https) { "https://localhost:8443" } else { "http://localhost:8080" }
+$mode = if ($env:AUTH_ENABLED -eq "true") { "connexion obligatoire" } else { "API ouverte (-Open)" }
+Write-Host "3/3 API Blasa sur $url  ($mode ; Ctrl+C pour arreter)" -ForegroundColor Cyan
+# ouvre le navigateur quand le serveur est pret (en HTTPS : ouvrir l'adresse a la main, certificat auto-signe)
+if (-not $https) { Start-Job { for ($i = 0; $i -lt 60; $i++) { try { Invoke-WebRequest "http://localhost:8080/" -UseBasicParsing | Out-Null; Start-Process "http://localhost:8080/"; break } catch { Start-Sleep 1 } } } | Out-Null }
 mvn -q compile exec:java

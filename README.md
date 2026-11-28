@@ -15,7 +15,8 @@
 - **Mise à jour en direct** : une réservation met à jour les autres écrans (Redis Pub/Sub puis SSE).
 - **Compte à rebours** : chaque trajet affiche le temps avant son départ, puis disparaît (TTL Redis).
 - **Mode technique** : requêtes HTTP, codes de réponse, commandes Redis et contenu de Redis en direct.
-- **Documentation OpenAPI / Swagger UI** : toutes les routes sont décrites et testables depuis le navigateur.
+- **Documentation OpenAPI / Swagger UI** : toutes les routes sont décrites et testables depuis le navigateur (lien « 📖 API » dans la barre du haut).
+- **Liste des trajets paginée** (6 par page) et **connexion par email et mot de passe** dans la page web, avec le choix **passager** (je cherche un covoiturage) ou **conducteur** (j'ai une voiture).
 - **Pagination** (optionnelle), **authentification JWT** (optionnelle) et **HTTPS** (optionnel) : désactivés par défaut,
   le comportement historique de l'API ne change pas tant qu'on ne les active pas.
 
@@ -35,8 +36,9 @@ lance l'API et ouvre `http://localhost:8080/`.
 En terminal :
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\start.ps1          # démarre
+powershell -ExecutionPolicy Bypass -File .\start.ps1          # démarre (connexion obligatoire)
 powershell -ExecutionPolicy Bypass -File .\start.ps1 -Reset   # repart de données neuves
+powershell -ExecutionPolicy Bypass -File .\start.ps1 -Open    # API ouverte, sans connexion (pour Postman)
 ```
 
 ## Documentation de l'API (OpenAPI / Swagger)
@@ -84,26 +86,41 @@ La réponse reste un tableau JSON ; le total est dans les en-têtes `X-Total-Cou
 **Sans `page` ni `size`, la liste complète est renvoyée comme avant** (la page web et Postman ne sont pas touchés).
 Valeurs invalides (`page=0`, `size=500`…) : `400`.
 
-### Authentification JWT (optionnelle)
+### Connexion (JWT), rôles passager / conducteur
 
-Par défaut l'API est ouverte. Pour exiger un jeton sur les écritures :
+**Par défaut, `start.ps1` active la connexion** (`AUTH_ENABLED=true`) : la page web demande un email et un mot de passe,
+et l'API exige un jeton JWT pour tout, sauf `POST /users` (inscription), `POST /auth/login` et `GET /events` (flux en direct).
+
+**Comptes de démonstration** (mot de passe : `blasa2026`) :
+
+| Email | Nom | Rôle |
+|---|---|---|
+| `sarra@mail.tn`, `ahmed@mail.tn`, `meriem@mail.tn` | Sarra, Ahmed, Meriem | conducteur |
+| `yassine@mail.tn`, `nour@mail.tn` | Yassine, Nour | passager |
+
+**Inscription** : le mot de passe (8 caractères minimum, stocké haché en PBKDF2, jamais renvoyé) et le **rôle** sont obligatoires.
+
+- `PASSENGER` : « je cherche un covoiturage ». Peut réserver et noter ; ne peut pas proposer de trajet.
+- `DRIVER` : « j'ai une voiture et je cherche des passagers ». Peut proposer et gérer des trajets ; ne réserve pas.
+
+L'email doit être unique (`409` sinon). Les règles sont vérifiées **par l'API** (`403`), pas seulement par la page.
 
 ```powershell
-$env:AUTH_ENABLED = "true"
-$env:JWT_SECRET   = "un-secret-d-au-moins-16-caracteres"     # sinon un secret aléatoire est généré à chaque démarrage
-powershell -ExecutionPolicy Bypass -File .\start.ps1
+POST /api/users        {"name":"Lina","email":"lina@mail.tn","city":"Sfax","password":"motdepasse123","role":"PASSENGER"}
+POST /api/auth/login   {"email":"lina@mail.tn","password":"motdepasse123"}   ->  {"token":"...","userId":6,"role":"PASSENGER",...}
+# puis, sur chaque appel :   Authorization: Bearer <jeton>
 ```
 
-1. **Créer un compte avec mot de passe** (8 caractères minimum, stocké haché en PBKDF2, jamais renvoyé) :
-   `POST /api/users` avec `{"name": "...", "email": "...", "city": "...", "password": "motdepasse123"}`.
-   Les comptes de démonstration n'ont pas de mot de passe : en définir un avec `PATCH /api/users/{id}` (`{"password": "..."}`).
-2. **Se connecter** : `POST /api/auth/login` avec `{"email": "...", "password": "..."}` renvoie `{"token": "..."}` (valable 1 h, `JWT_TTL_SECONDS`).
-3. **Appeler l'API** avec l'en-tête `Authorization: Bearer <jeton>`.
+Règles de l'API avec connexion : jeton absent ou invalide `401` ; modifier un compte, un trajet ou une réservation qui n'est pas le sien,
+ou agir avec le mauvais rôle `403` ; les emails des autres utilisateurs ne sont plus renvoyés. Le jeton dure 1 h (`JWT_TTL_SECONDS`) ;
+`JWT_SECRET` (16 caractères minimum) fixe la clé de signature, sinon une clé aléatoire est créée à chaque démarrage.
+Un compte créé avant l'ajout des rôles (sans rôle) garde tous les droits.
 
-Règles quand `AUTH_ENABLED=true` : les `GET`, `POST /users` et `POST /auth/login` restent publics ; toute autre écriture sans jeton
-valide répond `401` ; modifier un compte, un trajet ou une réservation qui n'est pas le sien répond `403`.
+**API ouverte (sans connexion)** : `.\start.ps1 -Open`. C'est le mode à utiliser avec la **collection Postman** : le mot de passe et le
+rôle y sont facultatifs et aucun jeton n'est exigé, comme dans la première version de l'API.
 
-> La page web `http://localhost:8080/` n'envoie pas encore de jeton : avec `AUTH_ENABLED=true`, utiliser Swagger UI ou Postman.
+> Après la mise à jour, lancer **`.\start.ps1 -Reset`** une fois : il recharge les données de démonstration avec les mots de passe et les rôles.
+> (`start.ps1` le fait aussi tout seul si les comptes de démo n'ont pas de mot de passe.)
 
 ### HTTPS (optionnel)
 
@@ -133,7 +150,7 @@ JAX-RS n'a pas d'annotation `@PATCH` : le projet en définit une (`PATCH.java`) 
 - **Tests automatisés (JUnit 5)** : `mvn test`. Les tests de pagination, JWT et hachage tournent sans Redis ; ceux des
   repositories (utilisateurs, trajets, réservations, recherche GEO) ont besoin de Redis (`docker compose up -d`) et
   sont ignorés s'il est éteint. Ils utilisent la **base Redis n° 15** : les données de démonstration (base 0) ne sont jamais touchées.
-- **Postman** : importer `postman/blasa.postman_collection.json`, puis *Run collection* : 24 requêtes, chacune vérifie son code de réponse.
+- **Postman** : lancer l'API avec `.\start.ps1 -Open`, importer `postman/blasa.postman_collection.json`, puis *Run collection* : 24 requêtes, chacune vérifie son code de réponse.
 
 ## Structure
 

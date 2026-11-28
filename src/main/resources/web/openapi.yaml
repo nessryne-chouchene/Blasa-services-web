@@ -9,9 +9,12 @@ info:
     - Format des échanges : **JSON** sur **HTTP** (les erreurs ont la forme `{"error": "message"}`).
     - Les données sont stockées dans **Redis** (hashes, sets, sorted sets, GEO, Pub/Sub, TTL).
     - Les dates (`departureAt`) sont des timestamps Unix en **secondes**.
-    - **Authentification (optionnelle)** : par défaut l'API est ouverte. Avec `AUTH_ENABLED=true` au démarrage,
-      les écritures exigent un jeton JWT (`POST /auth/login`, puis en-tête `Authorization: Bearer <jeton>`) ;
-      les lectures (`GET`) et l'inscription (`POST /users`) restent publiques.
+    - **Authentification** : avec `AUTH_ENABLED=true` (activé par défaut par `start.ps1`), tout exige un jeton JWT
+      (`POST /auth/login`, puis en-tête `Authorization: Bearer <jeton>`, bouton **Authorize**), sauf l'inscription
+      (`POST /users`), la connexion et le flux `GET /events`. Sans cette variable (`start.ps1 -Open`), l'API est ouverte.
+      Comptes de démonstration : `sarra@mail.tn` (conducteur), `yassine@mail.tn` (passager), mot de passe `blasa2026`.
+    - **Rôles** : `PASSENGER` (cherche un covoiturage : réserve, note) et `DRIVER` (a une voiture : propose des trajets).
+      Mauvais rôle : `403`.
     - **Pagination (optionnelle)** : `GET /users` et `GET /rides` acceptent `page` et `size`. Sans ces paramètres,
       la liste complète est renvoyée comme avant.
 servers:
@@ -45,8 +48,8 @@ paths:
       summary: Se connecter (obtenir un jeton JWT)
       description: |
         Renvoie un jeton à mettre dans l'en-tête `Authorization: Bearer <jeton>`.
-        Le compte doit avoir un mot de passe (champ `password` à la création, ou via `PATCH /users/{id}`).
-        Les comptes de démonstration n'en ont pas au départ.
+        Le compte doit avoir un mot de passe (obligatoire à l'inscription quand l'authentification est active).
+        Comptes de démonstration : `sarra@mail.tn`, `ahmed@mail.tn`, `meriem@mail.tn` (conducteurs), `yassine@mail.tn`, `nour@mail.tn` (passagers), mot de passe `blasa2026`.
       operationId: login
       security: []
       requestBody:
@@ -71,6 +74,7 @@ paths:
                   tokenType: { type: string, example: Bearer }
                   expiresIn: { type: integer, description: "Durée de validité en secondes", example: 3600 }
                   userId: { type: integer, format: int64 }
+                  role: { type: string, enum: [PASSENGER, DRIVER], nullable: true, description: "Rôle du compte (absent pour un ancien compte)" }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
@@ -479,7 +483,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Jeton obtenu avec POST /auth/login (exigé pour les écritures seulement si AUTH_ENABLED=true).
+      description: Jeton obtenu avec POST /auth/login (exigé pour toutes les routes sauf inscription et connexion, si AUTH_ENABLED=true).
   headers:
     TotalCount:
       description: Nombre total d'éléments (présent seulement si `page` ou `size` est fourni)
@@ -554,7 +558,8 @@ components:
         name: { type: string, example: Amine Ben Salah }
         email: { type: string, example: amine@example.tn }
         city: { type: string, example: Sfax }
-        password: { type: string, format: password, minLength: 8, writeOnly: true, description: "Optionnel, 8 caractères minimum ; stocké haché, jamais renvoyé" }
+        password: { type: string, format: password, minLength: 8, writeOnly: true, description: "Obligatoire à l'inscription quand l'authentification est active (8 caractères minimum) ; stocké haché, jamais renvoyé" }
+        role: { type: string, enum: [PASSENGER, DRIVER], description: "Obligatoire à l'inscription quand l'authentification est active. PASSENGER : je cherche un covoiturage. DRIVER : j'ai une voiture et je cherche des passagers." }
 
     UserPatch:
       type: object
@@ -573,6 +578,7 @@ components:
         email: { type: string }
         city: { type: string }
         ratingSum: { type: integer, readOnly: true }
+        role: { type: string, enum: [PASSENGER, DRIVER], readOnly: true, description: "Rôle choisi à l'inscription" }
         ratingCount: { type: integer, readOnly: true }
         averageRating: { type: number, format: double, readOnly: true, description: "Note moyenne (0 si aucune note)" }
 

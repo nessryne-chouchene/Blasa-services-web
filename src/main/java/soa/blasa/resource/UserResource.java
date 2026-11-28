@@ -2,6 +2,7 @@ package soa.blasa.resource;
 
 import java.net.URI;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import javax.ws.rs.Consumes;
@@ -13,11 +14,15 @@ import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
+import javax.ws.rs.container.ContainerRequestContext;
+import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
+import soa.blasa.model.Role;
 import soa.blasa.model.User;
 import soa.blasa.repository.UserRepository;
+import soa.blasa.security.AuthConfig;
 import soa.blasa.security.PasswordHasher;
 
 /** Ressource REST /api/users : les 5 methodes HTTP du cours sur un meme objet. */
@@ -53,6 +58,27 @@ public class UserResource {
         if (passwordError(body.getPassword()) != null) {
             return error(Response.Status.BAD_REQUEST, passwordError(body.getPassword()));
         }
+        String role;
+        try {
+            role = Role.normalize(body.getRole());
+        } catch (IllegalArgumentException e) {
+            return error(Response.Status.BAD_REQUEST, e.getMessage());
+        }
+        if (AuthConfig.enabled()) {                 // plateforme avec connexion : mot de passe et role obligatoires, email unique
+            if (blank(body.getPassword())) {
+                return error(Response.Status.BAD_REQUEST, "password obligatoire (" + PasswordHasher.MIN_LENGTH + " caracteres minimum)");
+            }
+            if (role == null) {
+                return error(Response.Status.BAD_REQUEST,
+                        "role obligatoire : PASSENGER (je cherche un covoiturage) ou DRIVER (j'ai une voiture)");
+            }
+            for (User other : repo.findAll()) {
+                if (other.getEmail() != null && other.getEmail().equalsIgnoreCase(body.getEmail().trim())) {
+                    return error(Response.Status.CONFLICT, "cet email est deja utilise");
+                }
+            }
+        }
+        body.setRole(role);
         User created = repo.create(body);
         return Response.created(URI.create("/api/users/" + created.getId())).entity(created).build();
     }
@@ -62,18 +88,22 @@ public class UserResource {
      * Pagination optionnelle : ?page=1&size=20 (voir PagedResponse). Sans parametre : tous les utilisateurs.
      */
     @GET
-    public Response list(@QueryParam("page") Integer page, @QueryParam("size") Integer size) {
-        return PagedResponse.of(repo.findAll(), page, size);
+    public Response list(@QueryParam("page") Integer page, @QueryParam("size") Integer size,
+            @Context ContainerRequestContext ctx) {
+        List<User> all = repo.findAll();
+        all.forEach(u -> Authz.hideEmailUnlessSelf(ctx, u));       // emails des autres caches si connexion active
+        return PagedResponse.of(all, page, size);
     }
 
     /** GET /users/{id} : lire un profil -> 200 ou 404. */
     @GET
     @Path("/{id}")
-    public Response get(@PathParam("id") long id) {
+    public Response get(@PathParam("id") long id, @Context ContainerRequestContext ctx) {
         User u = repo.find(id);
         if (u == null) {
             return error(Response.Status.NOT_FOUND, "utilisateur " + id + " introuvable");
         }
+        Authz.hideEmailUnlessSelf(ctx, u);
         return Response.ok(u).build();
     }
 
