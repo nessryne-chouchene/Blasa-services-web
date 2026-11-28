@@ -46,7 +46,7 @@ paths:
       description: |
         Renvoie un jeton à mettre dans l'en-tête `Authorization: Bearer <jeton>`.
         Le compte doit avoir un mot de passe (champ `password` à la création, ou via `PATCH /users/{id}`).
-        Les comptes de démonstration n'en ont pas au départ.
+        Les comptes de démonstration n'en ont pas au départ : en définir un (`PATCH /users/{id}`) avant d'activer `AUTH_ENABLED`.
       operationId: login
       security: []
       requestBody:

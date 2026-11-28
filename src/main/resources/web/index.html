@@ -58,6 +58,11 @@
   .btn { border: 0; border-radius: 10px; padding: 11px 18px; font-weight: 700; background: var(--brand); color: #fff; }
   .btn:hover { background: var(--brand-dark); }
   .btn.ghost { background: transparent; color: var(--brand); border: 1px solid var(--line); }
+  .pager { display: flex; gap: 12px; align-items: center; justify-content: center; margin: 18px 0 0; flex-wrap: wrap; }
+  .pager .hint { margin: 0; }
+  a.tech-btn { text-decoration: none; display: inline-block; }
+  details.login { margin: 14px 0 0; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+  details.login summary { cursor: pointer; font-weight: 600; color: var(--brand); }
   .btn.ghost:hover { border-color: var(--brand); background: var(--brand-soft); }
   .btn.danger { background: transparent; color: var(--err); border: 1px solid var(--line); }
   .btn.danger:hover { border-color: var(--err); }
@@ -188,6 +193,7 @@
     </nav>
     <span class="live" id="live" title="Connexion en direct (Redis Pub/Sub puis SSE)"><i></i><span>Hors ligne</span></span>
     <button class="me-chip" id="me-chip" hidden></button>
+    <a class="tech-btn" href="docs.html" target="_blank" rel="noopener" title="Documentation OpenAPI / Swagger de l'API">📖 API</a>
     <button class="tech-btn" id="tech-btn" title="Voir les requêtes HTTP et Redis">&lt;/&gt; Mode technique</button>
   </div>
 </header>
@@ -245,6 +251,7 @@ const store = {
 let me = null, users = [], currentView = "search", mineTab = "booked", drawerOpen = false;
 const rated = new Set();
 let lastOwn = 0, lastSearch = null;
+const PAGE_SIZE = 6;                     // trajets affichés par page (pagination de l'API : ?page=&size=)
 
 const userById = (id) => users.find((u) => u.id === id);
 const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
@@ -266,13 +273,16 @@ async function api(method, path, body, opt) {
   opt = opt || {};
   const o = { method, headers: {} };
   if (body !== undefined) { o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(body); }
-  const t0 = performance.now(); let status = 0, text = "";
-  try { const r = await fetch(API + path, o); status = r.status; text = await r.text(); } catch (e) { text = "Erreur réseau : " + e.message; }
+  const token = store.get("blasa.token");                 // jeton JWT : envoyé seulement si on s'est connecté avec un mot de passe
+  if (token) o.headers["Authorization"] = "Bearer " + token;
+  const t0 = performance.now(); let status = 0, text = "", hdrs = null;
+  try { const r = await fetch(API + path, o); status = r.status; hdrs = r.headers; text = await r.text(); } catch (e) { text = "Erreur réseau : " + e.message; }
+  if (status === 401 && !path.startsWith("/auth/")) store.del("blasa.token");   // jeton expiré ou refusé : on l'oublie
   let data = null; try { data = text ? JSON.parse(text) : null; } catch (e) { /* texte brut */ }
   if (!opt.quiet) logCall(method, API + path, body, status, Math.round(performance.now() - t0), data, text, opt.note);
   if (method !== "GET" && !opt.quiet) lastOwn = Date.now();   // pour ne pas afficher une notification de sa propre action
   if (method !== "GET" && drawerOpen) refreshRedis();
-  return { status, ok: status >= 200 && status < 300, data };
+  return { status, ok: status >= 200 && status < 300, data, headers: hdrs };
 }
 
 function logCall(method, url, body, status, ms, data, text, note) {
@@ -312,7 +322,7 @@ async function loadUsers() { const r = await api("GET", "/users", undefined, { q
 function setMe(u) {
   me = u; store.set("blasa.me", String(u.id));
   $("me-chip").hidden = false;
-  $("me-chip").innerHTML = avatar(u) + "<span>" + esc(u.name) + "</span>";
+  $("me-chip").innerHTML = avatar(u) + "<span>" + esc(u.name) + "</span>" + (store.get("blasa.token") ? '<span title="Connecté avec mot de passe (JWT)">🔒</span>' : "");
   $("welcome").hidden = true;
   go("search");
 }
@@ -328,13 +338,36 @@ function showWelcome() {
     '<label class="f">Prénom<input id="su-name" required maxlength="40"></label>' +
     '<label class="f">Email<input id="su-email" type="email" required></label>' +
     '<label class="f">Ta ville<select id="su-city">' + cityOptions("Sfax") + "</select></label>" +
-    '<button class="btn">Créer mon compte</button></form></div>';
+    '<label class="f">Mot de passe <small>(facultatif, 8 caractères minimum)</small><input id="su-pass" type="password" minlength="8" autocomplete="new-password"></label>' +
+    '<button class="btn">Créer mon compte</button></form>' +
+    '<details class="login"><summary>J\'ai déjà un mot de passe</summary>' +
+    '<form id="login" class="form" style="max-width:none;margin-top:10px">' +
+    '<label class="f">Email<input id="lg-email" type="email" required autocomplete="username"></label>' +
+    '<label class="f">Mot de passe<input id="lg-pass" type="password" required autocomplete="current-password"></label>' +
+    '<button class="btn">Me connecter</button></form></details></div>';
   $("signup").onsubmit = async (e) => {
     e.preventDefault();
-    const r = await api("POST", "/users", { name: $("su-name").value.trim(), email: $("su-email").value.trim(), city: $("su-city").value },
-      { note: "<code>INCR seq:user</code>, <code>HSET user:{id}</code>" });
+    const password = $("su-pass").value;
+    const body = { name: $("su-name").value.trim(), email: $("su-email").value.trim(), city: $("su-city").value };
+    if (password) body.password = password;
+    store.del("blasa.token");
+    const r = await api("POST", "/users", body, { note: "<code>INCR seq:user</code>, <code>HSET user:{id}</code>" + (password ? " (mot de passe haché PBKDF2)" : "") });
     if (!r.ok) return toast((r.data && r.data.error) || "Création impossible", true);
-    await loadUsers(); setMe(r.data); toast("Compte créé. Bienvenue " + r.data.name + " !");
+    if (password) {                                      // compte avec mot de passe : on se connecte tout de suite (JWT)
+      const l = await api("POST", "/auth/login", { email: body.email, password }, { note: "vérification du mot de passe, création du jeton JWT" });
+      if (l.ok) store.set("blasa.token", l.data.token);
+    }
+    await loadUsers(); setMe(userById(r.data.id) || r.data); toast("Compte créé. Bienvenue " + r.data.name + " !");
+  };
+  $("login").onsubmit = async (e) => {
+    e.preventDefault();
+    store.del("blasa.token");
+    const l = await api("POST", "/auth/login", { email: $("lg-email").value.trim(), password: $("lg-pass").value },
+      { note: "vérification du mot de passe, création du jeton JWT" });
+    if (!l.ok) return toast((l.data && l.data.error) || "Connexion impossible", true);
+    store.set("blasa.token", l.data.token);
+    await loadUsers(); const u = userById(l.data.userId);
+    if (u) { setMe(u); toast("Connecté. Bienvenue " + u.name + " !"); } else toast("Compte introuvable", true);
   };
 }
 
@@ -389,7 +422,7 @@ function viewSearch() {
     '<label class="f">Arrivée<select id="s-to">' + cityOptions("", true) + "</select></label>" +
     '<button class="btn" type="submit">Chercher</button>' +
     '<button class="btn ghost" type="button" id="s-near">📍 Près de moi</button></div></form>' +
-    '<h2 class="title" id="s-title">Prochains trajets</h2><div class="list" id="results"></div>';
+    '<h2 class="title" id="s-title">Prochains trajets</h2><div class="list" id="results"></div><div class="pager" id="pager"></div>';
   $("sform").onsubmit = (e) => { e.preventDefault(); doSearch(false); };
   $("s-near").onclick = () => doSearch(true);
   doSearch(false);
@@ -412,18 +445,28 @@ async function doSearch(near) {
     note = from && to ? "<code>SINTER rides:from:… rides:to:…</code>" : from || to ? "<code>SMEMBERS rides:from|to:…</code>" : "<code>ZRANGE rides:geo 0 -1</code>";
     title = from || to ? "Résultats" : "Prochains trajets";
   }
-  lastSearch = { url: "/rides" + (q.toString() ? "?" + q : ""), note, title };
+  lastSearch = { url: "/rides" + (q.toString() ? "?" + q : ""), note, title, page: 1 };
   return runSearch(lastSearch);
 }
 
 async function runSearch(s) {
-  const r = await api("GET", s.url, undefined, { note: s.note });
+  const url = s.url + (s.url.includes("?") ? "&" : "?") + "page=" + (s.page || 1) + "&size=" + PAGE_SIZE;
+  const r = await api("GET", url, undefined, { note: s.note + " · pagination : <code>?page=" + (s.page || 1) + "&amp;size=" + PAGE_SIZE + "</code>" });
   if (!r.ok) return toast("Recherche impossible", true);
+  const total = Number(r.headers && r.headers.get("X-Total-Count")) || 0;
+  const pages = Number(r.headers && r.headers.get("X-Total-Pages")) || 1;
+  if (!r.data.length && (s.page || 1) > 1 && pages >= 1) { s.page = pages; return runSearch(s); }   // la dernière page a disparu
   const rides = await enrich(r.data);
   if (!$("s-title")) return;                       // on a change de page pendant le chargement
-  $("s-title").textContent = s.title + " (" + rides.length + ")";
+  $("s-title").textContent = s.title + " (" + (total || rides.length) + ")";
   $("results").innerHTML = rides.length ? rides.map(rideCard).join("")
     : '<div class="empty"><b>Aucun trajet trouvé</b>Essaie d\'autres villes, ou propose toi-même ce trajet !</div>';
+  const page = s.page || 1;
+  $("pager").innerHTML = pages > 1
+    ? '<button class="btn ghost" data-act="page" data-dir="-1"' + (page <= 1 ? " disabled" : "") + '>← Précédent</button>' +
+      '<span class="hint">Page ' + page + " / " + pages + '</span>' +
+      '<button class="btn ghost" data-act="page" data-dir="1"' + (page >= pages ? " disabled" : "") + '>Suivant →</button>'
+    : "";
   setTimeout(tick, 0);
 }
 
@@ -511,7 +554,10 @@ function viewProfile() {
     '<label class="f">Email<input id="p-email" type="email" value="' + esc(me.email) + '" required></label>' +
     '<label class="f">Ville<select id="p-city">' + cityOptions(me.city) + "</select></label>" +
     '<button class="btn">Enregistrer</button></form>' +
-    '<div class="actions"><button class="btn ghost" data-act="switch">Changer de profil</button>' +
+    '<form id="pwform" class="form" style="max-width:none">' +
+    '<label class="f">Mot de passe <small>(8 caractères minimum ; sert à te connecter)</small><input id="p-pass" type="password" minlength="8" required autocomplete="new-password"></label>' +
+    '<button class="btn ghost">Définir / changer le mot de passe</button></form>' +
+    '<div class="actions"><button class="btn ghost" data-act="switch">Changer de profil / me déconnecter</button>' +
     '<button class="btn danger" data-act="delme">Supprimer mon compte</button></div></div>';
   $("pform").onsubmit = async (e) => {
     e.preventDefault();
@@ -520,11 +566,18 @@ function viewProfile() {
     if (!r.ok) return toast((r.data && r.data.error) || "Enregistrement impossible", true);
     await loadUsers(); setMe(userById(me.id)); go("profile"); toast("Profil mis à jour.");
   };
+  $("pwform").onsubmit = async (e) => {
+    e.preventDefault();
+    const r = await api("PATCH", "/users/" + me.id, { password: $("p-pass").value }, { note: "<code>HSET user:" + me.id + " pwHash</code> (hash PBKDF2, jamais le mot de passe)" });
+    if (!r.ok) return toast((r.data && r.data.error) || "Mot de passe non modifié", true);
+    $("p-pass").value = ""; toast("Mot de passe enregistré. Tu pourras te connecter avec ton email.");
+  };
 }
 
 /* ================= actions (boutons) ================= */
 const actions = {
-  pick(d) { setMe(userById(Number(d.id))); },
+  pick(d) { store.del("blasa.token"); setMe(userById(Number(d.id))); },
+  page(d) { if (lastSearch) { lastSearch.page = Math.max(1, (lastSearch.page || 1) + Number(d.dir)); runSearch(lastSearch); window.scrollTo(0, 0); } },
   async book(d) {
     const r = await api("POST", "/rides/" + d.ride + "/bookings", { userId: me.id }, { note: "<code>HINCRBY ride:" + d.ride + " seatsLeft -1</code> (atomique), <code>SADD …:passengers</code>" });
     toast(r.ok ? "Place réservée ! Bon voyage 🎉" : ((r.data && r.data.error) || "Réservation impossible"), !r.ok); refresh();
@@ -552,12 +605,12 @@ const actions = {
     const r = await api("DELETE", "/rides/" + d.ride, undefined, { note: "<code>SREM</code> index, <code>ZREM rides:geo</code>, <code>DEL ride:" + d.ride + "</code>" });
     toast(r.ok ? "Trajet annulé." : "Annulation impossible", !r.ok); refresh();
   },
-  async switch() { await loadUsers(); showWelcome(); },
+  async switch() { store.del("blasa.token"); await loadUsers(); showWelcome(); },
   async delme() {
     if (!confirm("Supprimer définitivement ton compte ?")) return;
     const r = await api("DELETE", "/users/" + me.id, undefined, { note: "<code>ZREM leaderboard:drivers</code>, <code>DEL user:" + me.id + "</code>" });
     if (!r.ok) return toast("Suppression impossible", true);
-    store.del("blasa.me"); me = null; $("me-chip").hidden = true; await loadUsers(); showWelcome(); toast("Compte supprimé.");
+    store.del("blasa.me"); store.del("blasa.token"); me = null; $("me-chip").hidden = true; await loadUsers(); showWelcome(); toast("Compte supprimé.");
   }
 };
 document.addEventListener("click", (e) => { const b = e.target.closest("[data-act]"); if (b && actions[b.dataset.act]) actions[b.dataset.act](b.dataset); });

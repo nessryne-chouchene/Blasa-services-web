@@ -15,7 +15,8 @@
 - **Mise à jour en direct** : une réservation met à jour les autres écrans (Redis Pub/Sub puis SSE).
 - **Compte à rebours** : chaque trajet affiche le temps avant son départ, puis disparaît (TTL Redis).
 - **Mode technique** : requêtes HTTP, codes de réponse, commandes Redis et contenu de Redis en direct.
-- **Documentation OpenAPI / Swagger UI** : toutes les routes sont décrites et testables depuis le navigateur.
+- **Documentation OpenAPI / Swagger UI** : toutes les routes sont décrites et testables depuis le navigateur (lien « 📖 API » dans la barre du haut).
+- **Liste des trajets paginée** (6 par page, boutons Précédent / Suivant) et **connexion par mot de passe** dans la page web.
 - **Pagination** (optionnelle), **authentification JWT** (optionnelle) et **HTTPS** (optionnel) : désactivés par défaut,
   le comportement historique de l'API ne change pas tant qu'on ne les active pas.
 
@@ -96,14 +97,18 @@ powershell -ExecutionPolicy Bypass -File .\start.ps1
 
 1. **Créer un compte avec mot de passe** (8 caractères minimum, stocké haché en PBKDF2, jamais renvoyé) :
    `POST /api/users` avec `{"name": "...", "email": "...", "city": "...", "password": "motdepasse123"}`.
-   Les comptes de démonstration n'ont pas de mot de passe : en définir un avec `PATCH /api/users/{id}` (`{"password": "..."}`).
+   Les comptes de démonstration n'ont pas de mot de passe. Pour en définir un, **faire le `PATCH /api/users/{id}` (`{"password": "..."}`) avant
+   d'activer `AUTH_ENABLED`** (avec l'authentification active, le `PATCH` exige déjà un jeton). Les mots de passe restent dans Redis : on peut
+   ensuite redémarrer avec `AUTH_ENABLED=true`. Plus simple : créer un nouveau compte avec mot de passe.
 2. **Se connecter** : `POST /api/auth/login` avec `{"email": "...", "password": "..."}` renvoie `{"token": "..."}` (valable 1 h, `JWT_TTL_SECONDS`).
 3. **Appeler l'API** avec l'en-tête `Authorization: Bearer <jeton>`.
 
 Règles quand `AUTH_ENABLED=true` : les `GET`, `POST /users` et `POST /auth/login` restent publics ; toute autre écriture sans jeton
 valide répond `401` ; modifier un compte, un trajet ou une réservation qui n'est pas le sien répond `403`.
 
-> La page web `http://localhost:8080/` n'envoie pas encore de jeton : avec `AUTH_ENABLED=true`, utiliser Swagger UI ou Postman.
+> **La page web gère la connexion** : l'écran d'accueil propose un mot de passe facultatif à l'inscription et un formulaire
+> « J'ai déjà un mot de passe » ; le jeton est conservé dans le navigateur et envoyé automatiquement (un 🔒 apparaît près du nom).
+> Les profils de démonstration (sans mot de passe) continuent de fonctionner quand `AUTH_ENABLED` n'est pas activé.
 
 ### HTTPS (optionnel)
 
